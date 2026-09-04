@@ -18,7 +18,8 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src/
 Python 3.12+, httpx, selectolax, protego, sqlite3 (no ORM), openai (Structured Outputs),
 tiktoken, pydantic v2 + pydantic-settings, typer, FastAPI + uvicorn, one static HTML dashboard
 with Chart.js from CDN. Tests: pytest + pytest-asyncio + respx; a fake OpenAI client.
-tldextract is the one addition (registrable-domain check). No LangChain/Scrapy/Celery/Docker.
+Additions: tldextract (registrable-domain check), defusedxml (untrusted sitemap XML),
+truststore (OS certificate store for corporate TLS). No LangChain/Scrapy/Celery/Docker.
 
 ## Architecture rules
 
@@ -38,7 +39,7 @@ commit → push → CI green. Zero network calls in tests.
 ## Phase status
 
 - [x] 0 scaffold
-- [ ] 1 crawler
+- [x] 1 crawler
 - [ ] 2 audit engine
 - [ ] 3 AI layer
 - [ ] 4 dashboard + export

@@ -18,6 +18,8 @@ dependencies = [
   "fastapi>=0.111",
   "uvicorn>=0.30",
   "tldextract>=5.1",
+  "defusedxml>=0.7",
+  "truststore>=0.10",
 ]
 
 [project.scripts]
@@ -31,6 +33,7 @@ dev = [
   "respx>=0.21",
   "ruff>=0.5",
   "mypy>=1.10",
+  "types-defusedxml>=0.7.0.20260504",
 ]
 
 [build-system]
@@ -55,6 +58,8 @@ max-args = 6
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["PLR0913", "PLR0915"]
+# Typer maps every CLI flag to a parameter, so command functions legitimately take many.
+"src/seo_scout/cli.py" = ["PLR0913", "PLR0917"]
 
 [tool.mypy]
 strict = true

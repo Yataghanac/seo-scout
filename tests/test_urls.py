@@ -1,0 +1,66 @@
+import pytest
+
+from seo_scout.urls import looks_binary, normalize, same_site
+
+
+@pytest.mark.parametrize(
+    ("raw", "base", "expected"),
+    [
+        ("https://Example.com/A", None, "https://example.com/A"),
+        ("https://example.com/a#frag", None, "https://example.com/a"),
+        ("https://example.com/a?b=2&a=1", None, "https://example.com/a?a=1&b=2"),
+        ("/rel/path", "https://example.com/dir/", "https://example.com/rel/path"),
+        ("sub", "https://example.com/dir/", "https://example.com/dir/sub"),
+        ("https://example.com/a/", None, "https://example.com/a"),
+        ("https://example.com/a///", None, "https://example.com/a"),
+        ("https://example.com", None, "https://example.com/"),
+        ("https://example.com/", None, "https://example.com/"),
+        ("HTTPS://example.com:443/x", None, "https://example.com/x"),
+        ("http://example.com:8080/x", None, "http://example.com:8080/x"),
+        ("  https://example.com/x  ", None, "https://example.com/x"),
+    ],
+)
+def test_normalize(raw: str, base: str | None, expected: str) -> None:
+    assert normalize(raw, base) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["mailto:a@b.c", "tel:+123", "javascript:void(0)", "#top", "", "ftp://x.y/z", "data:,hi"],
+)
+def test_normalize_rejects_non_crawlable(raw: str) -> None:
+    assert normalize(raw, "https://example.com/") is None
+
+
+def test_relative_without_base_is_rejected() -> None:
+    assert normalize("/a") is None
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "expected"),
+    [
+        ("https://example.com/", "https://blog.example.com/x", True),
+        ("https://a.co.uk/", "https://www.a.co.uk/", True),
+        ("https://a.co.uk/", "https://b.co.uk/", False),
+        ("https://example.com/", "https://example.org/", False),
+        ("https://example.com/", "http://example.com/", True),
+        ("https://localhost:8000/", "https://localhost:8000/x", True),
+    ],
+)
+def test_same_site(a: str, b: str, expected: bool) -> None:
+    assert same_site(a, b) is expected
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://x.test/a.pdf", True),
+        ("https://x.test/a.JPG", True),
+        ("https://x.test/a.zip?dl=1", True),
+        ("https://x.test/page", False),
+        ("https://x.test/page.html", False),
+        ("https://x.test/x?y=z", False),
+    ],
+)
+def test_looks_binary(url: str, expected: bool) -> None:
+    assert looks_binary(url) is expected

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import ssl
+from collections.abc import AsyncIterator
 from pathlib import Path
 
+import httpx
 import pytest
 
 _ENV_KEYS = (
@@ -25,3 +28,15 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for key in _ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture(scope="session")
+def ssl_context() -> ssl.SSLContext:
+    """Building an SSL context costs ~300 ms on Windows; do it once per session."""
+    return ssl.create_default_context()
+
+
+@pytest.fixture
+async def client(ssl_context: ssl.SSLContext) -> AsyncIterator[httpx.AsyncClient]:
+    async with httpx.AsyncClient(verify=ssl_context) as c:
+        yield c

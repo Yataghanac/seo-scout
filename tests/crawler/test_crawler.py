@@ -1,0 +1,291 @@
+import asyncio
+import sqlite3
+from typing import Any
+
+import httpx
+import pytest
+import respx
+
+from seo_scout.config import Settings
+from seo_scout.crawler.crawler import Crawler
+from seo_scout.store import db, repo_pages, repo_runs
+
+
+class Sleeps:
+    def __init__(self) -> None:
+        self.calls: list[float] = []
+
+    async def __call__(self, seconds: float) -> None:
+        self.calls.append(seconds)
+
+
+@pytest.fixture
+def conn() -> sqlite3.Connection:
+    return db.connect(":memory:")
+
+
+def make(
+    conn: sqlite3.Connection,
+    client: httpx.AsyncClient,
+    sleeps: Sleeps | None = None,
+    **kw: Any,
+) -> Crawler:
+    settings = Settings(min_delay=0.0, **kw)
+    return Crawler(settings=settings, conn=conn, client=client, sleep=sleeps or Sleeps())
+
+
+def html(*links: str, body: str = "") -> str:
+    anchors = "".join(f'<a href="{link}">l</a>' for link in links)
+    return f"<html><head><title>t</title></head><body>{anchors}{body}</body></html>"
+
+
+def no_robots_no_sitemap() -> None:
+    respx.get("https://e.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+
+
+def urls(conn: sqlite3.Connection, run_id: int) -> dict[str, int]:
+    return {p.url: p.depth for p in repo_pages.list_pages(conn, run_id)}
+
+
+@respx.mock
+async def test_bfs_crawl_persists_pages_and_links(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/a", "/b")))
+    respx.get("https://e.com/a").mock(return_value=httpx.Response(200, html=html("/c", "/")))
+    respx.get("https://e.com/b").mock(return_value=httpx.Response(200, html=html()))
+    respx.get("https://e.com/c").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com")
+    assert report.status == "complete"
+    assert report.pages == 4
+    assert urls(conn, report.run_id) == {
+        "https://e.com/": 0,
+        "https://e.com/a": 1,
+        "https://e.com/b": 1,
+        "https://e.com/c": 2,
+    }
+    assert repo_pages.inbound_counts(conn, report.run_id)["https://e.com/c"] == 1
+    run = repo_runs.get_run(conn, report.run_id)
+    assert run is not None
+    assert run.status == "complete"
+
+
+@respx.mock
+async def test_robots_disallow_is_honoured(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    respx.get("https://e.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nDisallow: /private\n")
+    )
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/").mock(
+        return_value=httpx.Response(200, html=html("/private/x", "/ok"))
+    )
+    private = respx.get("https://e.com/private/x").mock(
+        return_value=httpx.Response(200, html=html())
+    )
+    respx.get("https://e.com/ok").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/")
+    assert not private.called
+    assert set(urls(conn, report.run_id)) == {"https://e.com/", "https://e.com/ok"}
+
+
+@respx.mock
+async def test_crawl_delay_from_robots_is_used(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    respx.get("https://e.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nCrawl-delay: 2\n")
+    )
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/a")))
+    respx.get("https://e.com/a").mock(return_value=httpx.Response(200, html=html()))
+    sleeps = Sleeps()
+    await make(conn, client, sleeps).run("https://e.com/")
+    assert any(abs(s - 2.0) < 0.05 for s in sleeps.calls)
+
+
+@respx.mock
+async def test_off_domain_links_are_never_fetched(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(
+        return_value=httpx.Response(200, html=html("https://other.com/x", "mailto:a@b.c", "/in"))
+    )
+    other = respx.get("https://other.com/x").mock(return_value=httpx.Response(200, html=html()))
+    respx.get("https://e.com/in").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/")
+    assert not other.called
+    assert set(urls(conn, report.run_id)) == {"https://e.com/", "https://e.com/in"}
+
+
+@respx.mock
+async def test_depth_cap(conn: sqlite3.Connection, client: httpx.AsyncClient) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/1")))
+    respx.get("https://e.com/1").mock(return_value=httpx.Response(200, html=html("/2")))
+    deep = respx.get("https://e.com/2").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/", max_depth=1)
+    assert not deep.called
+    assert report.pages == 2
+
+
+@respx.mock
+async def test_max_pages_cap(conn: sqlite3.Connection, client: httpx.AsyncClient) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/a", "/b", "/c")))
+    for p in "abc":
+        respx.get(f"https://e.com/{p}").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/", max_pages=2)
+    assert report.pages == 2
+
+
+@respx.mock
+async def test_self_linking_loop_terminates(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(
+        return_value=httpx.Response(200, html=html("/", "/#top", "/?", "/a"))
+    )
+    respx.get("https://e.com/a").mock(return_value=httpx.Response(200, html=html("/a", "/")))
+    report = await make(conn, client).run("https://e.com/")
+    assert report.pages == 2
+
+
+@respx.mock
+async def test_redirect_chain_is_persisted(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/old")))
+    respx.get("https://e.com/old").mock(
+        return_value=httpx.Response(301, headers={"location": "/new"})
+    )
+    respx.get("https://e.com/new").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/")
+    pages = {p.url: p for p in repo_pages.list_pages(conn, report.run_id)}
+    old = pages["https://e.com/old"]
+    assert old.final_url == "https://e.com/new"
+    assert [h.status for h in old.redirect_chain] == [301]
+    assert old.status == 200
+
+
+@respx.mock
+async def test_malformed_html_and_404s_do_not_crash(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(
+        return_value=httpx.Response(200, html="<html><a href='/x'><p><<<>>>")
+    )
+    respx.get("https://e.com/x").mock(return_value=httpx.Response(404, html="nope"))
+    report = await make(conn, client).run("https://e.com/")
+    assert report.status == "complete"
+    assert repo_pages.status_by_url(conn, report.run_id)["https://e.com/x"] == 404
+
+
+@respx.mock
+async def test_single_network_failure_is_recorded_and_crawl_continues(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/a", "/b")))
+    respx.get("https://e.com/a").mock(side_effect=httpx.ConnectError("down"))
+    respx.get("https://e.com/b").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/")
+    assert report.status == "complete"
+    statuses = repo_pages.status_by_url(conn, report.run_id)
+    assert statuses["https://e.com/a"] == 0
+    assert statuses["https://e.com/b"] == 200
+
+
+@respx.mock
+async def test_network_going_down_yields_partial_run(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(
+        return_value=httpx.Response(200, html=html("/a", "/b", "/c", "/d"))
+    )
+    for p in "abcd":
+        respx.get(f"https://e.com/{p}").mock(side_effect=httpx.ConnectError("down"))
+    report = await make(conn, client).run("https://e.com/")
+    assert report.status == "partial"
+    assert "https://e.com/" in urls(conn, report.run_id)
+    run = repo_runs.get_run(conn, report.run_id)
+    assert run is not None
+    assert run.status == "partial"
+    assert run.error
+
+
+@respx.mock
+async def test_wall_clock_budget_yields_partial_run(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    no_robots_no_sitemap()
+
+    async def slow(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.2)
+        return httpx.Response(200, html=html("/a"))
+
+    respx.get("https://e.com/").mock(side_effect=slow)
+    respx.get("https://e.com/a").mock(side_effect=slow)
+    report = await make(conn, client).run("https://e.com/", wall_clock_seconds=0.1)
+    assert report.status == "partial"
+
+
+@respx.mock
+async def test_dry_run_fetches_no_pages(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    respx.get("https://e.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/sitemap.xml").mock(
+        return_value=httpx.Response(
+            200,
+            text='<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            "<url><loc>https://e.com/a</loc></url></urlset>",
+        )
+    )
+    home = respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html()))
+    planned = await make(conn, client).plan("https://e.com/")
+    assert planned == ["https://e.com/", "https://e.com/a"]
+    assert not home.called
+    assert repo_runs.list_runs(conn) == []
+
+
+@respx.mock
+async def test_sitemap_seeds_are_crawled_and_remembered(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    respx.get("https://e.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/sitemap.xml").mock(
+        return_value=httpx.Response(
+            200,
+            text='<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            "<url><loc>https://e.com/orphan</loc></url></urlset>",
+        )
+    )
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html()))
+    respx.get("https://e.com/orphan").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/")
+    assert set(urls(conn, report.run_id)) == {"https://e.com/", "https://e.com/orphan"}
+    assert repo_pages.sitemap_urls(conn, report.run_id) == {"https://e.com/orphan"}
+
+
+@respx.mock
+async def test_unreachable_robots_fails_the_run_loudly(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    respx.get("https://e.com/robots.txt").mock(side_effect=httpx.ConnectError("tls"))
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    home = respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/")
+    assert report.status == "failed"
+    assert report.pages == 0
+    assert report.error is not None
+    assert "robots.txt" in report.error
+    assert not home.called
