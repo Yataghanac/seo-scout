@@ -63,3 +63,27 @@ class Run(BaseModel):
     pages: int
     error: str | None
     settings: dict[str, Any]
+
+
+class PageIssue(Issue):
+    """An Issue pinned to the page it was found on."""
+
+    url: str
+
+
+class WorstPage(BaseModel):
+    url: str
+    score: int
+    issues: int
+
+
+class RunSummary(BaseModel):
+    """Site-level rollup of one audited run."""
+
+    run_id: int
+    pages_audited: int
+    average_score: float
+    score_distribution: dict[str, int]
+    issues_by_rule: dict[str, int]
+    issues_by_severity: dict[str, int]
+    worst_pages: list[WorstPage]

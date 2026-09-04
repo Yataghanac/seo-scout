@@ -26,7 +26,8 @@ truststore (OS certificate store for corporate TLS). No LangChain/Scrapy/Celery/
 - `src/seo_scout/{crawler,audit,ai,store,api,diff}` + `cli.py`, `config.py`, `logging.py`, `models.py`
 - Layers point inward: `crawler`→`store`; `audit`→`models` only; `ai`→`models`,`store`;
   `api`/`diff`→`store`; `store` imports none of the others. `cli` wires everything.
-- I/O at the edges. Rules and validators are pure functions.
+- I/O at the edges. Rules and validators are pure functions; `audit/service.py` is the
+  only audit module that touches the database.
 - Every function < 50 lines (ruff `max-statements=40`), every module < 400 lines (tested).
 - Config: one `Settings` object in `config.py`; secrets only via env / `.env`.
 - Logging: JSON lines to stderr with `run_id`; `--verbose` for per-URL debug.
@@ -40,7 +41,7 @@ commit → push → CI green. Zero network calls in tests.
 
 - [x] 0 scaffold
 - [x] 1 crawler
-- [ ] 2 audit engine
+- [x] 2 audit engine
 - [ ] 3 AI layer
 - [ ] 4 dashboard + export
 - [ ] 5 diff + automation

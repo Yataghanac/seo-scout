@@ -42,3 +42,27 @@ pool.
 status-0 page and the crawl continues; three consecutive transport failures abort the run as
 `partial` with the pages so far intact, and Ctrl+C does the same. There is no state that
 exists only in memory.
+
+## Phase 2 — Deterministic audit engine
+
+**What it does.** Runs 24 pure rules over every HTML page of a run, scores each page out of
+100, and rolls the results up into a site summary. Works with no OpenAI key at all; this is
+the layer that always produces value.
+
+**Non-obvious decision.** A rule is a plain function `(page, context) -> list[str]` registered
+with a decorator that carries its id, severity and a one-paragraph explanation. Rules never
+see the database or the network: cross-page facts (duplicate titles, inbound links, sitemap
+membership, link-target status codes) are computed once into a `CrawlContext` and handed in.
+That is what makes the table-driven fixture tests possible: one HTML file, one exact set of
+expected rule ids, no mocking.
+
+**What I chose not to do.** No rule engine, plugin loader or YAML configuration. Adding a rule
+is adding a function; the registry rejects duplicate ids and a test asserts every registered
+rule is covered by a fixture or a dedicated test. Scores are a flat weighted sum
+(critical 15, warning 5, notice 2, floored at 0) rather than a tuned model, because a score you
+can recompute in your head is one you can defend.
+
+**Failure mode prevented.** Re-running the audit is idempotent: issues and scores for a run
+are replaced in one transaction, so a crash mid-audit can never leave half of the old results
+mixed with half of the new ones. Pages without an HTML body (404s, binaries, network
+failures) are excluded from scoring instead of being punished for content they never had.

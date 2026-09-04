@@ -40,6 +40,7 @@ def test_crawl_writes_a_run_to_the_configured_db() -> None:
     result = runner.invoke(app, ["crawl", "https://e.com/", "--delay", "0", "--db", "t.db"])
     assert result.exit_code == 0, result.output
     assert "run 1" in result.stdout
+    assert "audit: 2 pages" in result.stdout
     runs = repo_runs.list_runs(db.connect("t.db"))
     assert len(runs) == 1
     assert runs[0].status == "complete"
@@ -50,3 +51,16 @@ def test_crawl_rejects_non_http_url() -> None:
     result = runner.invoke(app, ["crawl", "mailto:x@y.z"])
     assert result.exit_code != 0
     assert "http" in result.output
+
+
+def test_audit_command_reaudits_an_existing_run() -> None:
+    test_crawl_writes_a_run_to_the_configured_db()
+    result = runner.invoke(app, ["audit", "1", "--db", "t.db"])
+    assert result.exit_code == 0, result.output
+    assert "audit: 2 pages" in result.stdout
+
+
+def test_audit_command_rejects_unknown_run() -> None:
+    result = runner.invoke(app, ["audit", "42", "--db", "t.db"])
+    assert result.exit_code != 0
+    assert "42" in result.output

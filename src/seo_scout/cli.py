@@ -11,10 +11,12 @@ import truststore
 import typer
 
 from seo_scout import __version__
+from seo_scout.audit.service import audit_run
 from seo_scout.config import Settings
 from seo_scout.crawler.crawler import Crawler
-from seo_scout.logging import configure_logging
-from seo_scout.store import db
+from seo_scout.logging import bind_run_id, configure_logging
+from seo_scout.models import RunSummary
+from seo_scout.store import db, repo_runs
 
 app = typer.Typer(
     help="SEO Scout: crawl, audit, and propose validated title/meta rewrites.",
@@ -78,6 +80,33 @@ async def _crawl(
         f"run {report.run_id}: {report.status}, {report.pages} pages in {report.elapsed_s:.1f}s"
         + (f" ({report.error})" if report.error else "")
     )
+    if report.status != "failed":
+        _echo_summary(audit_run(conn, report.run_id))
+
+
+def _echo_summary(summary: RunSummary) -> None:
+    issues = sum(summary.issues_by_rule.values())
+    by_sev = ", ".join(f"{n} {sev}" for sev, n in sorted(summary.issues_by_severity.items()))
+    typer.echo(
+        f"audit: {summary.pages_audited} pages, average score {summary.average_score}, "
+        f"{issues} issues ({by_sev or 'none'})"
+    )
+
+
+@app.command()
+def audit(
+    run_id: Annotated[int, typer.Argument(help="Run to (re-)audit")],
+    db_path: Annotated[str | None, typer.Option("--db", help="SQLite file")] = None,
+    verbose: Annotated[bool, typer.Option(help="Debug logs")] = False,
+) -> None:
+    """Re-run the deterministic audit rules over a stored crawl."""
+    settings = Settings(db=db_path) if db_path else Settings()
+    configure_logging(verbose=verbose)
+    conn = db.connect(settings.db)
+    if repo_runs.get_run(conn, run_id) is None:
+        raise typer.BadParameter(f"run {run_id} does not exist in {settings.db}")
+    bind_run_id(run_id)
+    _echo_summary(audit_run(conn, run_id))
 
 
 if __name__ == "__main__":

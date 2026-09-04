@@ -42,3 +42,22 @@ CREATE TABLE IF NOT EXISTS sitemap_urls (
 
 CREATE INDEX IF NOT EXISTS idx_pages_run ON pages (run_id);
 CREATE INDEX IF NOT EXISTS idx_links_run_to ON links (run_id, to_url);
+
+CREATE TABLE IF NOT EXISTS issues (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id   INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    url      TEXT    NOT NULL,
+    rule_id  TEXT    NOT NULL,
+    severity TEXT    NOT NULL,
+    message  TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS page_scores (
+    run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    url    TEXT    NOT NULL,
+    score  INTEGER NOT NULL,
+    UNIQUE (run_id, url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_issues_run_url ON issues (run_id, url);
+CREATE INDEX IF NOT EXISTS idx_issues_run_rule ON issues (run_id, rule_id);
