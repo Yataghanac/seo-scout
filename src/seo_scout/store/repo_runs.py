@@ -54,3 +54,16 @@ def get_run(conn: sqlite3.Connection, run_id: int) -> Run | None:
 def list_runs(conn: sqlite3.Connection) -> list[Run]:
     rows = conn.execute("SELECT * FROM runs ORDER BY id DESC").fetchall()
     return [_row_to_run(r) for r in rows]
+
+
+def previous_run(conn: sqlite3.Connection, run_id: int) -> Run | None:
+    """The newest earlier, non-failed run of the same start URL, for diffing."""
+    current = get_run(conn, run_id)
+    if current is None:
+        return None
+    row = conn.execute(
+        """SELECT * FROM runs WHERE start_url = ? AND id < ? AND status != 'failed'
+           ORDER BY id DESC LIMIT 1""",
+        (current.start_url, run_id),
+    ).fetchone()
+    return _row_to_run(row) if row else None

@@ -9,6 +9,8 @@ Portfolio project; every design decision must be explainable (see DECISIONS.md).
 uv sync                                  # install (set UV_SYSTEM_CERTS=1 on this machine)
 uv run seo-scout crawl https://site --max-pages 50
 uv run seo-scout serve                   # dashboard on :8000
+uv run seo-scout diff 1 2 [--json]       # compare two runs
+uv run seo-scout report https://site     # crawl + diff vs last run + reports/ + Slack
 uv run pytest                            # offline, < 15 s
 uv run pytest --cov=seo_scout.audit --cov=seo_scout.ai --cov-report=term-missing
 uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src/
@@ -56,5 +58,5 @@ commit → push → CI green. Zero network calls in tests.
 - [x] 2 audit engine
 - [x] 3 AI layer
 - [x] 4 dashboard + export
-- [ ] 5 diff + automation
+- [x] 5 diff + automation
 - [ ] 6 docs

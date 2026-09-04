@@ -124,3 +124,27 @@ columns straight from the store, and those columns are only ever written from a 
 object (Phase 3), so the dashboard can render "proposed title" without re-checking anything.
 Rejected pages show the exact violations instead of a blank, which is what makes the AI layer
 auditable on camera.
+
+## Phase 5 — Diffing and automation
+
+**What it does.** `seo-scout diff a b` compares two runs of the same site: pages added and
+removed, per-page score changes, issues fixed and issues introduced, as a terminal table or
+JSON. `seo-scout report <url>` is the scheduler entry point: crawl, find the previous run of
+that site, diff, write `reports/run-N.json` and `.md`, and post a one-line summary to Slack if
+`SLACK_WEBHOOK_URL` is set.
+
+**Non-obvious decision.** A diff compares rule ids per page, not issue messages. Messages
+contain counts and quoted text ("Title is used on 3 pages") that change for reasons unrelated
+to the page itself, so comparing them would report churn instead of fixes. Rule ids are stable
+identities: a rule that fired last week and not this week is a fix, full stop. Pages that
+appear or disappear are reported separately and never counted as fixed or introduced issues.
+
+**What I chose not to do.** No `--schedule` daemon. A process that sleeps for a week is a
+process that dies for a week; cron and Windows Task Scheduler already do this job well, so
+the README gives one line for each. No Slack SDK either: an incoming webhook is one HTTP POST,
+and a failed post is logged and reported, never allowed to fail the report.
+
+**Failure mode prevented.** Automation that silently drifts. The report command is
+idempotent per run, exits non-zero only when the crawl itself failed, and the very first run
+of a site writes a baseline report rather than erroring on "nothing to compare", so a scheduler
+can be pointed at a new site with no manual bootstrapping.
