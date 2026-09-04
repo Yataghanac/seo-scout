@@ -66,3 +66,36 @@ can recompute in your head is one you can defend.
 are replaced in one transaction, so a crash mid-audit can never leave half of the old results
 mixed with half of the new ones. Pages without an HTML body (404s, binaries, network
 failures) are excluded from scoring instead of being punished for content they never had.
+
+## Phase 3 — The AI layer
+
+**What it does.** For pages whose title or meta description failed a deterministic rule, asks
+GPT-4o for a rewritten title, meta description and a one-line diagnosis, using Structured
+Outputs with a strict JSON schema. Every answer is checked by `ai/validate.py` before it is
+stored; the model gets exactly one repair attempt with the specific violations listed, and a
+second failure is recorded as `rejected` with the reason. Unchanged pages are served from a
+content-hash cache at zero cost, and a pre-flight token estimate stops the run before it can
+exceed `--max-cost`.
+
+**Non-obvious decision.** The validator is deliberately dumb. Lengths are counted, "unchanged"
+is byte equality, "invented facts" means a number, price, year, percentage or claim phrase in
+the proposal that does not appear anywhere in the page text, and "truncated" is a punctuation
+and last-word check. No second model call judges the first. That makes every rejection
+explainable in one sentence and reproducible in a unit test, which is worth more here than
+catching subtler hallucinations. The last-word heuristic (a final word that is not on the page
+but is a prefix of a word that is) will occasionally flag a legitimate title; the cost of that
+is one repair call, whereas the cost of the opposite mistake is showing a cut-off title as a
+recommendation.
+
+**What I chose not to do.** No LangChain, no agent loop, no retries beyond one repair, no
+embeddings. Prompt-injection defense is a regex strip plus explicit delimiters plus a system
+prompt that names page text as data; it is not a classifier, because the validator is the real
+backstop: an injected instruction can at worst produce an off-task suggestion, and an off-task
+suggestion is rejected on the same grounds as any other.
+
+**Failure mode prevented.** Partial or unvalidated writes. Each page's API calls and its
+suggestion row are committed in one transaction, and the suggestion columns are only ever
+populated from a validated object. Missing key, bad key, rate limit, timeout and outage all
+map to one `AIUnavailable` path that marks remaining pages `unavailable`, prints one warning,
+and leaves the deterministic audit untouched. Cost is never a surprise: the budget gate runs
+before each call, the run total is printed, and re-running on an unchanged site costs $0.

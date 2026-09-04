@@ -61,3 +61,41 @@ CREATE TABLE IF NOT EXISTS page_scores (
 
 CREATE INDEX IF NOT EXISTS idx_issues_run_url ON issues (run_id, url);
 CREATE INDEX IF NOT EXISTS idx_issues_run_rule ON issues (run_id, rule_id);
+
+CREATE TABLE IF NOT EXISTS ai_cache (
+    key             TEXT PRIMARY KEY,
+    model           TEXT NOT NULL,
+    prompt_version  TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    suggestion_json TEXT,
+    reason          TEXT,
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_calls (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id            INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    url               TEXT    NOT NULL,
+    kind              TEXT    NOT NULL,
+    prompt_tokens     INTEGER NOT NULL,
+    completion_tokens INTEGER NOT NULL,
+    usd               REAL    NOT NULL,
+    created_at        TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_suggestions (
+    run_id           INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    url              TEXT    NOT NULL,
+    original_title   TEXT,
+    original_meta    TEXT,
+    diagnosis        TEXT,
+    title            TEXT,
+    meta_description TEXT,
+    status           TEXT    NOT NULL,
+    reason           TEXT,
+    cached           INTEGER NOT NULL DEFAULT 0,
+    cost_usd         REAL    NOT NULL DEFAULT 0,
+    UNIQUE (run_id, url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_calls_run ON ai_calls (run_id);

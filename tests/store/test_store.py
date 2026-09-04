@@ -1,15 +1,8 @@
 import sqlite3
 from datetime import UTC, datetime
 
-import pytest
-
 from seo_scout.models import FetchedPage, RedirectHop
 from seo_scout.store import db, repo_pages, repo_runs
-
-
-@pytest.fixture
-def conn() -> sqlite3.Connection:
-    return db.connect(":memory:")
 
 
 def page(url: str, status: int = 200, depth: int = 0) -> FetchedPage:

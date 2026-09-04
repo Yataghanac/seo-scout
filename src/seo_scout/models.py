@@ -87,3 +87,18 @@ class RunSummary(BaseModel):
     issues_by_rule: dict[str, int]
     issues_by_severity: dict[str, int]
     worst_pages: list[WorstPage]
+
+
+class SuggestionRow(BaseModel):
+    """One page's AI outcome. status: ok | repaired | rejected | skipped | unavailable."""
+
+    url: str
+    original_title: str | None
+    original_meta: str | None
+    diagnosis: str | None
+    title: str | None
+    meta_description: str | None
+    status: str
+    reason: str | None
+    cached: bool
+    cost_usd: float

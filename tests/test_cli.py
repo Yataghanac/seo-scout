@@ -1,3 +1,5 @@
+from contextlib import closing
+
 import httpx
 import respx
 from typer.testing import CliRunner
@@ -41,7 +43,10 @@ def test_crawl_writes_a_run_to_the_configured_db() -> None:
     assert result.exit_code == 0, result.output
     assert "run 1" in result.stdout
     assert "audit: 2 pages" in result.stdout
-    runs = repo_runs.list_runs(db.connect("t.db"))
+    assert "ai: 2 pages considered" in result.stdout
+    assert "OPENAI_API_KEY unset" in result.output
+    with closing(db.connect("t.db")) as conn:
+        runs = repo_runs.list_runs(conn)
     assert len(runs) == 1
     assert runs[0].status == "complete"
     assert runs[0].pages == 2
@@ -64,3 +69,21 @@ def test_audit_command_rejects_unknown_run() -> None:
     result = runner.invoke(app, ["audit", "42", "--db", "t.db"])
     assert result.exit_code != 0
     assert "42" in result.output
+
+
+def test_ai_command_without_key_degrades_cleanly() -> None:
+    test_crawl_writes_a_run_to_the_configured_db()
+    result = runner.invoke(app, ["ai", "1", "--db", "t.db"])
+    assert result.exit_code == 0, result.output
+    assert "2 skipped" in result.stdout
+    assert "deterministic results only" in result.output
+
+
+@respx.mock
+def test_crawl_no_ai_flag_skips_the_stage() -> None:
+    respx.get("https://e.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html="<p>x</p>"))
+    result = runner.invoke(app, ["crawl", "https://e.com/", "--delay", "0", "--no-ai"])
+    assert result.exit_code == 0, result.output
+    assert "ai:" not in result.stdout

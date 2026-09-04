@@ -10,6 +10,7 @@ uv sync                                  # install (set UV_SYSTEM_CERTS=1 on thi
 uv run seo-scout crawl https://site --max-pages 50
 uv run seo-scout serve                   # dashboard on :8000
 uv run pytest                            # offline, < 15 s
+uv run pytest --cov=seo_scout.audit --cov=seo_scout.ai --cov-report=term-missing
 uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src/
 ```
 
@@ -32,6 +33,16 @@ truststore (OS certificate store for corporate TLS). No LangChain/Scrapy/Celery/
 - Config: one `Settings` object in `config.py`; secrets only via env / `.env`.
 - Logging: JSON lines to stderr with `run_id`; `--verbose` for per-URL debug.
 
+## AI layer invariants
+
+- `ai/validate.py` is the gate: nothing the model returns is stored as a suggestion unless
+  `validate()` returns no violations. One repair attempt, then `rejected` with the reason.
+- Page text is untrusted: `ai/sanitize.py` strips instruction-like text and fences the rest.
+- Cache key = sha256(url | title | meta | body[:2000] | model | PROMPT_VERSION). Bump
+  `PROMPT_VERSION` in `ai/prompt.py` to invalidate deliberately.
+- Budget is checked *before* every call with a tiktoken estimate; actual usage is recorded.
+- Tests never touch the network: `tests/ai/fakes.py` scripts the model; respx mocks the SDK.
+
 ## Workflow
 
 Each phase: tests first → green → ruff/mypy clean → DECISIONS.md entry → one conventional
@@ -42,7 +53,7 @@ commit → push → CI green. Zero network calls in tests.
 - [x] 0 scaffold
 - [x] 1 crawler
 - [x] 2 audit engine
-- [ ] 3 AI layer
+- [x] 3 AI layer
 - [ ] 4 dashboard + export
 - [ ] 5 diff + automation
 - [ ] 6 docs

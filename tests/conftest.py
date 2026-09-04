@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import sqlite3
 import ssl
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import httpx
 import pytest
+
+from seo_scout.store import db
 
 _ENV_KEYS = (
     "OPENAI_API_KEY",
@@ -40,3 +43,13 @@ def ssl_context() -> ssl.SSLContext:
 async def client(ssl_context: ssl.SSLContext) -> AsyncIterator[httpx.AsyncClient]:
     async with httpx.AsyncClient(verify=ssl_context) as c:
         yield c
+
+
+@pytest.fixture
+def conn() -> Iterator[sqlite3.Connection]:
+    """A fresh in-memory database with the schema applied, closed after the test."""
+    connection = db.connect(":memory:")
+    try:
+        yield connection
+    finally:
+        connection.close()

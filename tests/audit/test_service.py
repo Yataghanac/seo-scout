@@ -3,16 +3,9 @@
 import sqlite3
 from datetime import UTC, datetime
 
-import pytest
-
 from seo_scout.audit.service import audit_run, summarize_run
 from seo_scout.models import FetchedPage
-from seo_scout.store import db, repo_issues, repo_pages, repo_runs
-
-
-@pytest.fixture
-def conn() -> sqlite3.Connection:
-    return db.connect(":memory:")
+from seo_scout.store import repo_issues, repo_pages, repo_runs
 
 
 def fetched(url: str, html: str | None, status: int = 200) -> FetchedPage:

@@ -3,12 +3,11 @@ import sqlite3
 from typing import Any
 
 import httpx
-import pytest
 import respx
 
 from seo_scout.config import Settings
 from seo_scout.crawler.crawler import Crawler
-from seo_scout.store import db, repo_pages, repo_runs
+from seo_scout.store import repo_pages, repo_runs
 
 
 class Sleeps:
@@ -17,11 +16,6 @@ class Sleeps:
 
     async def __call__(self, seconds: float) -> None:
         self.calls.append(seconds)
-
-
-@pytest.fixture
-def conn() -> sqlite3.Connection:
-    return db.connect(":memory:")
 
 
 def make(
