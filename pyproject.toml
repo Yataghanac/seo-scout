@@ -60,6 +60,8 @@ max-args = 6
 "tests/**" = ["PLR0913", "PLR0915"]
 # Typer maps every CLI flag to a parameter, so command functions legitimately take many.
 "src/seo_scout/cli.py" = ["PLR0913", "PLR0917"]
+# FastAPI maps every query parameter to a parameter the same way.
+"src/seo_scout/api/routes.py" = ["PLR0913", "PLR0917"]
 
 [tool.mypy]
 strict = true
@@ -74,6 +76,10 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = [
+  "error::ResourceWarning",
+  "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
 
 [tool.coverage.run]
 source = ["seo_scout.audit", "seo_scout.ai"]

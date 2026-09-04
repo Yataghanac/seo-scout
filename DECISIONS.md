@@ -99,3 +99,28 @@ populated from a validated object. Missing key, bad key, rate limit, timeout and
 map to one `AIUnavailable` path that marks remaining pages `unavailable`, prints one warning,
 and leaves the deterministic audit untouched. Cost is never a surprise: the budget gate runs
 before each call, the run total is printed, and re-running on an unchanged site costs $0.
+
+## Phase 4 — Dashboard and export
+
+**What it does.** `seo-scout serve` runs FastAPI with four JSON endpoints (runs, summary,
+paginated/filterable pages, CSV and JSON export) and one static HTML page that renders a score
+histogram, an issues-by-rule chart, a sortable page table, and a before/after panel showing
+the original and proposed title and meta with the validator's verdict and reason.
+
+**Non-obvious decision.** Filtering, sorting and pagination happen in Python over one query's
+rows, not in SQL. A run is hard-capped at 500 pages, so the whole result set is a few hundred
+small objects; pushing `WHERE severity = ?` into the repository layer would have leaked API
+concerns into `store` for no measurable gain. The dashboard fetches all pages once and does
+its own filtering client-side for the same reason, so every filter change is instant.
+
+**What I chose not to do.** No frontend framework, no build step, no bundler: one HTML file,
+vanilla JS, Chart.js from a pinned CDN URL with a Subresource Integrity hash. The recording
+needs the data to be legible, not the framework to be impressive. Each request opens and
+closes its own SQLite connection instead of sharing a pool; at this scale the connection
+cost is microseconds and the isolation removes a whole class of threading bugs.
+
+**Failure mode prevented.** Showing an unvalidated suggestion. The API serves suggestion
+columns straight from the store, and those columns are only ever written from a validated
+object (Phase 3), so the dashboard can render "proposed title" without re-checking anything.
+Rejected pages show the exact violations instead of a blank, which is what makes the AI layer
+auditable on camera.

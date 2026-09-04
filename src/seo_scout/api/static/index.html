@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SEO Scout</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c2230; --line: #2a3140;
+    --ink: #e8e6df; --muted: #9aa3b2; --faint: #5d6675;
+    --accent: #f2b544; --accent-ink: #1a1200;
+    --critical: #ff5c5c; --warning: #f2b544; --notice: #6fb7ff; --good: #5fd39a;
+    --serif: "Fraunces", "Iowan Old Style", Georgia, serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f1ea; --panel: #fffdf8; --panel-2: #f1ede4; --line: #ddd6c8;
+      --ink: #1c1a16; --muted: #5d5a52; --faint: #9a958a;
+      --accent: #b8760a; --accent-ink: #fff8e8;
+      --critical: #c8322e; --warning: #b8760a; --notice: #2265b8; --good: #1f8a5b;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--mono); }
+  body { background-image: radial-gradient(1200px 500px at 10% -10%, rgba(242,181,68,.10), transparent 60%); min-height: 100vh; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header { display: flex; align-items: baseline; gap: 20px; padding: 22px 32px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  h1 { font: 700 30px/1 var(--serif); margin: 0; letter-spacing: -0.01em; }
+  h1 small { font: 500 12px var(--mono); color: var(--faint); margin-left: 8px; letter-spacing: .08em; text-transform: uppercase; }
+  .spacer { flex: 1; }
+  select, input[type=search], button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
+  select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .exports a { margin-left: 12px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+  main { padding: 18px 32px 60px; display: grid; gap: 18px; max-width: 1500px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; animation: rise .5s ease both; }
+  .tile:nth-child(2) { animation-delay: .05s } .tile:nth-child(3) { animation-delay: .1s } .tile:nth-child(4) { animation-delay: .15s } .tile:nth-child(5) { animation-delay: .2s } .tile:nth-child(6) { animation-delay: .25s }
+  .tile .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .tile .v { font: 700 34px/1.1 var(--serif); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .tile .s { color: var(--faint); font-size: 12px; margin-top: 4px; }
+  .v.critical { color: var(--critical) } .v.warning { color: var(--warning) } .v.notice { color: var(--notice) } .v.good { color: var(--good) } .v.accent { color: var(--accent) }
+  .charts { display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px; }
+  @media (max-width: 1000px) { .charts { grid-template-columns: 1fr } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .panel h2 { font: 700 17px var(--serif); margin: 0 0 10px; }
+  .chart-wrap { position: relative; height: 240px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .toolbar .count { color: var(--faint); margin-left: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; }
+  th.active { color: var(--accent); }
+  tbody tr { cursor: pointer; transition: background .12s; }
+  tbody tr:hover, tbody tr.selected { background: var(--panel-2); }
+  td.url { max-width: 560px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.score { font: 700 18px var(--serif); font-variant-numeric: tabular-nums; }
+  .pip { display: inline-block; min-width: 22px; text-align: center; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 600; margin-right: 4px; color: var(--bg); }
+  .pip.critical { background: var(--critical) } .pip.warning { background: var(--warning) } .pip.notice { background: var(--notice) } .pip.zero { background: var(--line); color: var(--faint); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; border: 1px solid currentColor; }
+  .badge.ok, .badge.repaired { color: var(--good) } .badge.rejected { color: var(--critical) } .badge.skipped, .badge.unavailable, .badge.none { color: var(--faint) }
+  .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; color: var(--muted); }
+  .detail { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 1000px) { .detail { grid-template-columns: 1fr } }
+  .detail h3 { font: 700 15px var(--serif); margin: 0 0 8px; }
+  .issue { padding: 8px 0; border-bottom: 1px dashed var(--line); }
+  .issue .m { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .issue .e { color: var(--faint); font-size: 12px; margin-top: 4px; }
+  .ba { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .ba .box { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .ba .box .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; }
+  .ba .box .t { font: 500 15px/1.35 var(--serif); margin-top: 6px; }
+  .ba .box .d { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .ba .box.after { border-color: var(--accent); }
+  .len { color: var(--faint); font-weight: 400; letter-spacing: 0; text-transform: none; }
+  .len.bad { color: var(--critical); }
+  .reason { white-space: pre-wrap; color: var(--critical); background: color-mix(in srgb, var(--critical) 8%, transparent); border-radius: 8px; padding: 10px 12px; margin-top: 10px; font-size: 13px; }
+  .diag { margin-top: 10px; color: var(--muted); font-style: italic; font-family: var(--serif); }
+  .empty { color: var(--faint); padding: 30px; text-align: center; }
+  .warn { border-left: 3px solid var(--warning); padding: 8px 12px; background: color-mix(in srgb, var(--warning) 10%, transparent); border-radius: 6px; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+</style>
+</head>
+<body>
+<header>
+  <h1>SEO Scout<small>crawl · audit · rewrite</small></h1>
+  <label>run <select id="run"></select></label>
+  <span class="spacer"></span>
+  <span class="exports">
+    <a id="csv" href="#">CSV</a><a id="json" href="#">JSON</a><a href="/api/docs">API</a>
+  </span>
+</header>
+<main>
+  <div id="notice" class="warn" hidden></div>
+  <section class="tiles" id="tiles"></section>
+  <section class="charts">
+    <div class="panel"><h2>Score distribution</h2><div class="chart-wrap"><canvas id="hist"></canvas></div></div>
+    <div class="panel"><h2>Issues by rule</h2><div class="chart-wrap"><canvas id="rules"></canvas></div></div>
+  </section>
+  <section class="panel">
+    <div class="toolbar">
+      <select id="severity"><option value="">all severities</option><option>critical</option><option>warning</option><option>notice</option></select>
+      <select id="rule"><option value="">all rules</option></select>
+      <select id="ai"><option value="">any AI status</option><option value="ok">ok</option><option value="repaired">repaired</option><option value="rejected">rejected</option><option value="skipped">skipped</option><option value="unavailable">unavailable</option></select>
+      <input id="q" type="search" placeholder="filter by URL">
+      <span class="count" id="count"></span>
+    </div>
+    <table>
+      <thead><tr>
+        <th data-k="url">URL</th><th data-k="score" class="active">Score ▲</th><th data-k="issues">Issues</th><th data-k="ai">AI</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="pager"><button id="prev">‹ prev</button><span id="pageinfo"></span><button id="next">next ›</button></div>
+  </section>
+  <section class="panel" id="detail" hidden></section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const state = { runId: null, summary: null, pages: [], sort: "score", order: "asc", page: 1, size: 50, selected: null, charts: {} };
+
+async function api(path) { const r = await fetch(path); if (!r.ok) throw new Error(`${path}: ${r.status}`); return r.json(); }
+
+async function init() {
+  const runs = await api("/api/runs");
+  const sel = $("#run");
+  if (!runs.length) { $("#notice").hidden = false; $("#notice").textContent = "No runs yet. Run: seo-scout crawl https://example.com --max-pages 50"; return; }
+  for (const r of runs) {
+    const o = document.createElement("option");
+    o.value = r.id; o.textContent = `#${r.id} · ${r.start_url} · ${r.pages} pages · ${r.status}`;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => loadRun(Number(sel.value));
+  await loadRun(runs[0].id);
+}
+
+async function loadRun(id) {
+  state.runId = id; state.page = 1; state.selected = null;
+  const [summary, pages] = await Promise.all([api(`/api/runs/${id}/summary`), api(`/api/runs/${id}/pages?size=500&sort=score&order=asc`)]);
+  state.summary = summary; state.pages = pages.items;
+  $("#csv").href = `/api/runs/${id}/export.csv`; $("#json").href = `/api/runs/${id}/export.json`;
+  renderNotice(); renderTiles(); renderCharts(); renderRuleOptions(); renderTable(); $("#detail").hidden = true;
+}
+
+function renderNotice() {
+  const run = state.summary.run, n = $("#notice");
+  if (run.status === "complete") { n.hidden = true; return; }
+  n.hidden = false; n.textContent = `Run ${run.id} is ${run.status}${run.error ? ": " + run.error : ""}. Results below cover the pages fetched before it stopped.`;
+}
+
+function renderTiles() {
+  const s = state.summary.summary, ai = state.summary.ai, sev = s.issues_by_severity;
+  const total = Object.values(s.issues_by_rule).reduce((a, b) => a + b, 0);
+  const validated = ai.ok + ai.repaired;
+  const tiles = [
+    ["pages audited", s.pages_audited, "", `${state.summary.run.pages} fetched`],
+    ["average score", s.average_score, s.average_score >= 80 ? "good" : s.average_score >= 50 ? "warning" : "critical", "out of 100"],
+    ["critical", sev.critical || 0, "critical", `${total} issues total`],
+    ["warnings", sev.warning || 0, "warning", ""],
+    ["notices", sev.notice || 0, "notice", ""],
+    ["AI rewrites", validated, validated ? "accent" : "", `${ai.rejected} rejected · ${ai.cached} cached`],
+    ["AI cost", `$${ai.usd.toFixed(4)}`, "", `${ai.calls} calls · ${(ai.prompt_tokens + ai.completion_tokens).toLocaleString()} tokens`],
+  ];
+  $("#tiles").innerHTML = tiles.map(([k, v, c, sub]) => `<div class="tile"><div class="k">${k}</div><div class="v ${c}">${esc(v)}</div><div class="s">${esc(sub)}</div></div>`).join("");
+}
+
+function chart(id, cfg) {
+  if (state.charts[id]) state.charts[id].destroy();
+  state.charts[id] = new Chart($(id), cfg);
+}
+
+function renderCharts() {
+  const s = state.summary.summary, rules = state.summary.rules;
+  Chart.defaults.color = css("--muted"); Chart.defaults.borderColor = css("--line"); Chart.defaults.font.family = css("--mono");
+  const buckets = ["0-19", "20-39", "40-59", "60-79", "80-100"];
+  const bucketColors = [css("--critical"), css("--critical"), css("--warning"), css("--notice"), css("--good")];
+  chart("#hist", { type: "bar", data: { labels: buckets, datasets: [{ data: buckets.map((b) => s.score_distribution[b] || 0), backgroundColor: bucketColors, borderRadius: 4 }] },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }, maintainAspectRatio: false, animation: { duration: 500 } } });
+  const byRule = Object.entries(s.issues_by_rule).sort((a, b) => b[1] - a[1]);
+  const sevColor = { critical: css("--critical"), warning: css("--warning"), notice: css("--notice") };
+  chart("#rules", { type: "bar", data: { labels: byRule.map(([r]) => r), datasets: [{ data: byRule.map(([, n]) => n), backgroundColor: byRule.map(([r]) => sevColor[rules[r]?.severity] || css("--accent")), borderRadius: 4 }] },
+    options: { indexAxis: "y", plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: (c) => rules[c.label]?.explanation || "" } } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } }, maintainAspectRatio: false, animation: { duration: 500 },
+      onClick: (_, els) => { if (els.length) { $("#rule").value = byRule[els[0].index][0]; state.page = 1; renderTable(); } } } });
+}
+
+function renderRuleOptions() {
+  const sel = $("#rule"); sel.innerHTML = '<option value="">all rules</option>';
+  for (const [r, n] of Object.entries(state.summary.summary.issues_by_rule).sort()) { const o = document.createElement("option"); o.value = r; o.textContent = `${r} (${n})`; sel.appendChild(o); }
+}
+
+function visiblePages() {
+  const sev = $("#severity").value, rule = $("#rule").value, ai = $("#ai").value, q = $("#q").value.toLowerCase();
+  let rows = state.pages.filter((p) => (!sev || p.counts[sev] > 0) && (!rule || p.issues.some((i) => i.rule_id === rule)) && (!ai || (p.ai && p.ai.status === ai)) && (!q || p.url.toLowerCase().includes(q)));
+  const key = { url: (p) => p.url, score: (p) => p.score, issues: (p) => p.issues.length, ai: (p) => (p.ai ? p.ai.status : "~") }[state.sort];
+  rows.sort((a, b) => (key(a) > key(b) ? 1 : key(a) < key(b) ? -1 : 0) * (state.order === "asc" ? 1 : -1));
+  return rows;
+}
+
+function renderTable() {
+  const rows = visiblePages(), start = (state.page - 1) * state.size, slice = rows.slice(start, start + state.size);
+  $("#count").textContent = `${rows.length} of ${state.pages.length} pages`;
+  $("#rows").innerHTML = slice.length ? slice.map((p) => `<tr data-url="${esc(p.url)}" class="${state.selected === p.url ? "selected" : ""}">
+      <td class="url" title="${esc(p.url)}">${esc(p.url)}</td>
+      <td class="score">${p.score}</td>
+      <td>${pips(p.counts)}</td>
+      <td>${p.ai ? `<span class="badge ${p.ai.status}">${p.ai.status}${p.ai.cached ? " · cached" : ""}</span>` : '<span class="badge none">—</span>'}</td></tr>`).join("")
+    : '<tr><td colspan="4" class="empty">Nothing matches these filters.</td></tr>';
+  const pages = Math.max(1, Math.ceil(rows.length / state.size));
+  $("#pageinfo").textContent = `page ${state.page} / ${pages}`;
+  $("#prev").disabled = state.page <= 1; $("#next").disabled = state.page >= pages;
+  for (const tr of $("#rows").querySelectorAll("tr[data-url]")) tr.onclick = () => showDetail(tr.dataset.url);
+  for (const th of document.querySelectorAll("th[data-k]")) { th.classList.toggle("active", th.dataset.k === state.sort); th.textContent = th.textContent.replace(/ [▲▼]$/, "") + (th.dataset.k === state.sort ? (state.order === "asc" ? " ▲" : " ▼") : ""); }
+}
+
+function pips(c) {
+  return ["critical", "warning", "notice"].map((s) => `<span class="pip ${c[s] ? s : "zero"}" title="${s}">${c[s]}</span>`).join("");
+}
+
+function lenTag(text, lo, hi) {
+  const n = (text || "").length, bad = n < lo || n > hi;
+  return `<span class="len ${bad ? "bad" : ""}">${n} chars${bad ? ` (want ${lo}–${hi})` : ""}</span>`;
+}
+
+function showDetail(url) {
+  const p = state.pages.find((x) => x.url === url); if (!p) return;
+  state.selected = url; renderTable();
+  const rules = state.summary.rules, ai = p.ai;
+  const issues = p.issues.length ? p.issues.map((i) => `<div class="issue"><span class="pip ${i.severity}">${i.severity[0].toUpperCase()}</span> <b>${esc(i.rule_id)}</b><div class="m">${esc(i.message)}</div><div class="e">${esc(rules[i.rule_id]?.explanation || "")}</div></div>`).join("") : '<div class="empty">No issues. Clean page.</div>';
+  let aiHtml;
+  const weak = p.issues.some((i) => i.rule_id.startsWith("title_") || i.rule_id.startsWith("meta_description_"));
+  if (!ai) aiHtml = `<div class="empty">${weak ? `The AI stage has not run for this run (no API key, --no-ai, or an older run). Run <code>seo-scout ai ${state.runId}</code> to request a rewrite.` : "Title and meta passed every deterministic rule, so no rewrite was requested."}</div>`;
+  else {
+    const proposed = ai.status === "ok" || ai.status === "repaired";
+    aiHtml = `<div class="ba">
+      <div class="box"><div class="k">current title ${lenTag(ai.original_title, 30, 60)}</div><div class="t">${esc(ai.original_title) || "<i>missing</i>"}</div></div>
+      <div class="box after"><div class="k">proposed title ${proposed ? lenTag(ai.title, 30, 60) : ""}</div><div class="t">${proposed ? esc(ai.title) : "<i>no validated suggestion</i>"}</div></div>
+      <div class="box"><div class="k">current meta ${lenTag(ai.original_meta, 70, 160)}</div><div class="d">${esc(ai.original_meta) || "<i>missing</i>"}</div></div>
+      <div class="box after"><div class="k">proposed meta ${proposed ? lenTag(ai.meta_description, 70, 160) : ""}</div><div class="d">${proposed ? esc(ai.meta_description) : "<i>no validated suggestion</i>"}</div></div>
+    </div>
+    <p>Verdict: <span class="badge ${ai.status}">${ai.status}</span> ${ai.status === "repaired" ? "— first answer failed validation; the single repair attempt passed" : ai.status === "ok" ? "— passed validation on the first attempt" : ai.status === "rejected" ? "— failed validation twice; the deterministic issue stands" : ""} ${ai.cached ? "· served from cache ($0)" : `· $${(ai.cost_usd || 0).toFixed(4)}`}</p>
+    ${ai.diagnosis ? `<div class="diag">“${esc(ai.diagnosis)}”</div>` : ""}
+    ${ai.reason ? `<div class="reason">${esc(ai.reason)}</div>` : ""}`;
+  }
+  $("#detail").hidden = false;
+  $("#detail").innerHTML = `<h2><a href="${esc(p.final_url)}" target="_blank" rel="noopener">${esc(p.url)}</a> <span class="len">score ${p.score} · HTTP ${p.status} · depth ${p.depth} · ${p.elapsed_ms} ms · ${(p.bytes / 1024).toFixed(0)} KB</span></h2>
+    <div class="detail"><div><h3>Issues (${p.issues.length})</h3>${issues}</div><div><h3>Before / after</h3>${aiHtml}</div></div>`;
+  $("#detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+for (const id of ["#severity", "#rule", "#ai"]) $(id).onchange = () => { state.page = 1; renderTable(); };
+$("#q").oninput = () => { state.page = 1; renderTable(); };
+$("#prev").onclick = () => { state.page--; renderTable(); };
+$("#next").onclick = () => { state.page++; renderTable(); };
+for (const th of document.querySelectorAll("th[data-k]")) th.onclick = () => { const k = th.dataset.k; state.order = state.sort === k && state.order === "asc" ? "desc" : "asc"; state.sort = k; state.page = 1; renderTable(); };
+init().catch((e) => { $("#notice").hidden = false; $("#notice").textContent = `Could not load data: ${e.message}`; });
+</script>
+</body>
+</html>

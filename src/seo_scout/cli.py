@@ -11,10 +11,12 @@ from typing import Annotated, Any
 import httpx
 import truststore
 import typer
+import uvicorn
 
 from seo_scout import __version__
 from seo_scout.ai.client import make_completer
 from seo_scout.ai.pipeline import AIRunReport, enrich_run
+from seo_scout.api.app import create_app
 from seo_scout.audit.service import audit_run
 from seo_scout.config import Settings
 from seo_scout.crawler.crawler import Crawler
@@ -165,6 +167,18 @@ def ai(
     with closing(_open_run(settings, run_id)) as conn:
         audit_run(conn, run_id)
         asyncio.run(_enrich(conn, settings, run_id))
+
+
+@app.command()
+def serve(
+    port: Annotated[int, typer.Option(help="Port for the dashboard")] = 8000,
+    host: Annotated[str, typer.Option(help="Bind address")] = "127.0.0.1",
+    db_path: Annotated[str | None, typer.Option("--db", help="SQLite file")] = None,
+) -> None:
+    """Serve the dashboard and JSON API."""
+    settings = Settings(db=db_path) if db_path else Settings()
+    typer.echo(f"dashboard: http://{host}:{port}  (db: {settings.db})")
+    uvicorn.run(create_app(settings.db), host=host, port=port, log_level="warning")
 
 
 def _open_run(settings: Settings, run_id: int) -> sqlite3.Connection:

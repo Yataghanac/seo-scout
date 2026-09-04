@@ -53,8 +53,17 @@ def _row_to_page(row: sqlite3.Row) -> FetchedPage:
     )
 
 
-def list_pages(conn: sqlite3.Connection, run_id: int) -> list[FetchedPage]:
-    rows = conn.execute("SELECT * FROM pages WHERE run_id = ? ORDER BY id", (run_id,)).fetchall()
+def list_pages(
+    conn: sqlite3.Connection, run_id: int, *, with_html: bool = True
+) -> list[FetchedPage]:
+    """All pages of a run in fetch order. `with_html=False` skips the largest column."""
+    html_col = "html" if with_html else "NULL AS html"
+    rows = conn.execute(
+        f"SELECT id, run_id, url, final_url, status, depth, content_type, bytes, elapsed_ms, "
+        f"fetched_at, {html_col}, redirect_chain_json, headers_json, error "
+        "FROM pages WHERE run_id = ? ORDER BY id",
+        (run_id,),
+    ).fetchall()
     return [_row_to_page(r) for r in rows]
 
 
