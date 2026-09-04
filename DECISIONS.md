@@ -148,3 +148,28 @@ and a failed post is logged and reported, never allowed to fail the report.
 idempotent per run, exits non-zero only when the crawl itself failed, and the very first run
 of a site writes a baseline report rather than erroring on "nothing to compare", so a scheduler
 can be pointed at a new site with no manual bootstrapping.
+
+## Phase 6 — Docs and verification
+
+**What it does.** README with a four-command quickstart, a mermaid architecture diagram, the
+crawling policy, the AI validation design and its rationale, cost characteristics, cron and
+Task Scheduler one-liners, and an honest limitations list. The definition-of-done crawl
+(`crawl https://books.toscrape.com --max-pages 50`) ran clean: 50 pages in 26 s, 187 issues,
+AI stage skipped with one warning because no key was configured.
+
+**Non-obvious decision.** The README leads with what the validator rejects and why, not with
+features. For a portfolio piece the reviewer's first question is "how do you know the model's
+output is right?", and the answer has to be visible without opening the code. The limitations
+section is written to be quoted back at me: no JS rendering, English-calibrated heuristics,
+single host, a heuristic score, a truncation check that can false-positive. Naming them is
+cheaper than being asked about them.
+
+**What I chose not to do.** No `--schedule` flag, no Docker, no hosted demo. Two scheduler
+one-liners cover the automation story on every OS the tool runs on, and a screenshot of a real
+crawl covers the demo. The dashboard grew two query-string hooks (`?theme=`, `?page=`) purely
+so the screenshot is reproducible from one headless-browser command that lives in CLAUDE.md.
+
+**Failure mode prevented.** Documentation drifting from behaviour. The quickstart commands,
+the sample output block and the cost table are the literal output and arithmetic of the code as
+committed; the CLAUDE.md "pending" list records the two things that need a human (a GitHub
+token scope and an API key) so the next session does not rediscover them.

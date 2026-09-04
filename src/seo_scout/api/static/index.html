@@ -17,13 +17,20 @@
     --serif: "Fraunces", "Iowan Old Style", Georgia, serif;
     --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
+  /* Dark is the base. Light follows the OS unless ?theme=dark|light forces one. */
   @media (prefers-color-scheme: light) {
-    :root {
+    :root:not([data-theme=dark]) {
       --bg: #f4f1ea; --panel: #fffdf8; --panel-2: #f1ede4; --line: #ddd6c8;
       --ink: #1c1a16; --muted: #5d5a52; --faint: #9a958a;
       --accent: #b8760a; --accent-ink: #fff8e8;
       --critical: #c8322e; --warning: #b8760a; --notice: #2265b8; --good: #1f8a5b;
     }
+  }
+  :root[data-theme=light] {
+      --bg: #f4f1ea; --panel: #fffdf8; --panel-2: #f1ede4; --line: #ddd6c8;
+      --ink: #1c1a16; --muted: #5d5a52; --faint: #9a958a;
+      --accent: #b8760a; --accent-ink: #fff8e8;
+      --critical: #c8322e; --warning: #b8760a; --notice: #2265b8; --good: #1f8a5b;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--mono); }
@@ -83,6 +90,7 @@
   .diag { margin-top: 10px; color: var(--muted); font-style: italic; font-family: var(--serif); }
   .empty { color: var(--faint); padding: 30px; text-align: center; }
   .warn { border-left: 3px solid var(--warning); padding: 8px 12px; background: color-mix(in srgb, var(--warning) 10%, transparent); border-radius: 6px; }
+  :root[data-still] .tile { animation: none; }
   @keyframes rise { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
 </style>
 </head>
@@ -124,7 +132,10 @@
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-const state = { runId: null, summary: null, pages: [], sort: "score", order: "asc", page: 1, size: 50, selected: null, charts: {} };
+const params = new URLSearchParams(location.search);
+if (params.get("theme")) document.documentElement.dataset.theme = params.get("theme");
+if (params.has("still")) document.documentElement.dataset.still = "1";
+const state = { runId: null, summary: null, pages: [], sort: "score", order: "asc", page: 1, size: Number(params.get("size")) || 50, selected: null, charts: {} };
 
 async function api(path) { const r = await fetch(path); if (!r.ok) throw new Error(`${path}: ${r.status}`); return r.json(); }
 
@@ -138,7 +149,11 @@ async function init() {
     sel.appendChild(o);
   }
   sel.onchange = () => loadRun(Number(sel.value));
-  await loadRun(runs[0].id);
+  const wanted = Number(params.get("run")) || runs[0].id;
+  sel.value = wanted;
+  await loadRun(wanted);
+  const pick = params.get("page");
+  if (pick) showDetail(pick === "first" ? visiblePages()[0]?.url : pick);
 }
 
 async function loadRun(id) {
@@ -251,7 +266,7 @@ function showDetail(url) {
   $("#detail").hidden = false;
   $("#detail").innerHTML = `<h2><a href="${esc(p.final_url)}" target="_blank" rel="noopener">${esc(p.url)}</a> <span class="len">score ${p.score} · HTTP ${p.status} · depth ${p.depth} · ${p.elapsed_ms} ms · ${(p.bytes / 1024).toFixed(0)} KB</span></h2>
     <div class="detail"><div><h3>Issues (${p.issues.length})</h3>${issues}</div><div><h3>Before / after</h3>${aiHtml}</div></div>`;
-  $("#detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  if (!params.has("page")) $("#detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 for (const id of ["#severity", "#rule", "#ai"]) $(id).onchange = () => { state.page = 1; renderTable(); };

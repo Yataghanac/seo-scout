@@ -46,6 +46,26 @@ truststore (OS certificate store for corporate TLS). No LangChain/Scrapy/Celery/
 - Budget is checked *before* every call with a tiktoken estimate; actual usage is recorded.
 - Tests never touch the network: `tests/ai/fakes.py` scripts the model; respx mocks the SDK.
 
+## Regenerating the README screenshot
+
+Serve the project DB, then capture with headless Chrome/Edge (dark theme, first page open):
+
+```bash
+uv run seo-scout serve &
+chrome --headless --hide-scrollbars --window-size=1440,1180 --virtual-time-budget=8000 \
+  --screenshot=docs/screenshot.png "http://127.0.0.1:8000/?theme=dark&still=1&size=6&page=first"
+```
+
+Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<id>`,
+`?page=first|<url>`.
+
+## Pending (needs a human)
+
+- `gh auth refresh -h github.com -s workflow`, then `git push -u origin main` (the token
+  lacks the `workflow` scope needed to push `.github/workflows/ci.yml`).
+- Put `OPENAI_API_KEY` in `.env`, run `uv run seo-scout ai 1 --max-cost 0.5`, retake the
+  screenshot, and paste the measured cost into README "Cost characteristics".
+
 ## Workflow
 
 Each phase: tests first → green → ruff/mypy clean → DECISIONS.md entry → one conventional
@@ -59,4 +79,4 @@ commit → push → CI green. Zero network calls in tests.
 - [x] 3 AI layer
 - [x] 4 dashboard + export
 - [x] 5 diff + automation
-- [ ] 6 docs
+- [x] 6 docs
