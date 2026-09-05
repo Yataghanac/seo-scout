@@ -57,3 +57,18 @@ async def test_network_error_falls_back_to_homepage(client: httpx.AsyncClient) -
     respx.get("https://example.com/sitemap.xml").mock(side_effect=httpx.ReadTimeout("slow"))
     seeds = await discover_seeds(client, "https://example.com/", [])
     assert seeds.urls == ["https://example.com/"]
+
+
+@respx.mock
+async def test_site_under_a_path_prefix_tries_its_own_sitemap(client: httpx.AsyncClient) -> None:
+    """docs.example.com/uv/ keeps its sitemap at /uv/sitemap.xml, not at the host root."""
+    docs = """<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://example.com/docs/guide/</loc></url></urlset>"""
+    root = respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://example.com/docs/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=docs)
+    )
+    seeds = await discover_seeds(client, "https://example.com/docs/", [])
+    assert root.called
+    assert seeds.urls == ["https://example.com/docs", "https://example.com/docs/guide"]
+    assert seeds.from_sitemap == {"https://example.com/docs/guide"}

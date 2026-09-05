@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 from defusedxml import ElementTree
@@ -54,6 +54,15 @@ async def _get_text(client: httpx.AsyncClient, url: str, user_agent: str | None)
     return response.text if response.status_code == 200 else None
 
 
+def _default_sitemaps(home: str) -> list[str]:
+    """Host root first; for a site under a path prefix (docs.example.com/uv/) also that path."""
+    candidates = [urljoin(home, "/sitemap.xml")]
+    path = urlsplit(home).path
+    if path not in ("", "/") and "." not in path.rsplit("/", 1)[-1]:
+        candidates.append(urljoin(home + "/", "sitemap.xml"))
+    return candidates
+
+
 async def discover_seeds(
     client: httpx.AsyncClient,
     site_url: str,
@@ -63,7 +72,7 @@ async def discover_seeds(
 ) -> Seeds:
     """Homepage first, then every same-site URL found in sitemaps (index files followed)."""
     home = normalize(site_url) or site_url
-    queue = deque(robots_sitemaps or [urljoin(home, "/sitemap.xml")])
+    queue = deque(robots_sitemaps or _default_sitemaps(home))
     visited: set[str] = set()
     found: dict[str, None] = {}
     while queue and len(visited) < MAX_SITEMAP_FILES:

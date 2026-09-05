@@ -210,3 +210,21 @@ reviewer should be able to open any repaired page and see the exact check that c
 first answer, which is the difference between "we validate" and "here is the validation
 working". It also gives a cheap signal for prompt tuning: if the same code dominates the
 repair reasons, the prompt, not the validator, is what to fix.
+
+## Post-launch — Sitemap discovery also looks under the start path
+
+**What happened.** The first crawl of `docs.astral.sh/uv/` found "1 seed" from a sitemap
+that lists 84 pages. That host's robots.txt is an HTML page (no `Sitemap:` line), so discovery
+fell back to `/sitemap.xml` at the host root, which is a 404. The real file is
+`/uv/sitemap.xml`: MkDocs, Docusaurus and most docs generators write the sitemap at the site's
+base path, and a docs host often serves several such sites under one domain.
+
+**Decision.** With no robots hint, try the host root first and then `<start path>/sitemap.xml`
+when the start URL has a directory-like path (no dot in its last segment). One extra request at
+most, and it is only made when the start URL says the site is not at the root. Robots-declared
+sitemaps still take priority and skip both guesses.
+
+**Consequence worth knowing.** Seeds change crawl order. On a capped run the pages you get
+are the first N seeds, so a site that gains a sitemap between two runs will show a large
+added/removed diff that is churn, not change. The diff report is honest about it either way;
+this note exists so nobody reads that churn as a regression.
