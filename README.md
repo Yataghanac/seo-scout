@@ -8,14 +8,19 @@ results in a dashboard. Self-hosted, one SQLite file, one command.
 
 ## Quickstart
 
-Three commands. You need Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+You need [uv](https://docs.astral.sh/uv/). Install SEO Scout as a command, then three
+commands:
 
 ```bash
-git clone https://github.com/Yataghanac/seo-scout && cd seo-scout && uv sync
-uv run seo-scout init                                   # writes .env; add OPENAI_API_KEY to enable rewrites
-uv run seo-scout crawl https://books.toscrape.com --max-pages 50
-uv run seo-scout serve --open                           # opens the dashboard in your browser
+uv tool install --python 3.12 git+https://github.com/Yataghanac/seo-scout
+seo-scout init                                   # writes .env; add OPENAI_API_KEY to enable rewrites
+seo-scout crawl https://books.toscrape.com --max-pages 50
+seo-scout serve --open                           # opens the dashboard in your browser
 ```
+
+`--python 3.12` makes uv fetch a suitable interpreter when the machine's default Python is
+older; 3.13 works too. Working on the code instead? `git clone`, `uv sync`, and prefix every
+command with `uv run` (see [Development](#development)).
 
 What you will see:
 

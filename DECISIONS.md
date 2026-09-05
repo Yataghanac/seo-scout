@@ -249,3 +249,18 @@ hosting, adaptation and support, and `docs/commercial.md` exists so a buyer's fi
 questions (what leaves my machine, what does it cost, what will it not do) are answered in
 writing before the demo. Selling source licences for code already public under MIT would
 not survive a customer's lawyer, so that path was closed deliberately.
+
+## Post-launch — Install path verified from the wheel and from GitHub
+
+**What was checked.** `uv build` produces a wheel that contains the dashboard HTML, the
+SQL schema and the LICENSE. `uv tool install` from that wheel, and directly from
+`git+https://github.com/Yataghanac/seo-scout`, gives a `seo-scout` command that runs `init`,
+`crawl` and `serve` end to end with no source checkout. `init` writes a minimal `.env` when
+no template is present, which is the tool-install case.
+
+**What it changed.** The README quickstart now leads with the tool install, since that is
+what a customer types; the clone-and-`uv run` path moved under Development. The install line
+pins `--python 3.12` because on a machine whose default Python is older uv otherwise refuses
+with a resolution error, which is the first thing a non-developer would hit. `[project.urls]`
+was added so the package page, when it is published, links back to the repo and to this file.
+No PyPI publish yet: a GitHub install needs no account and no release process.

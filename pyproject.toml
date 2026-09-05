@@ -22,6 +22,12 @@ dependencies = [
   "truststore>=0.10",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Yataghanac/seo-scout"
+Repository = "https://github.com/Yataghanac/seo-scout"
+Issues = "https://github.com/Yataghanac/seo-scout/issues"
+Changelog = "https://github.com/Yataghanac/seo-scout/blob/main/DECISIONS.md"
+
 [project.scripts]
 seo-scout = "seo_scout.cli:app"
 
