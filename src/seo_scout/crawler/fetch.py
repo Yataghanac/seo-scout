@@ -7,12 +7,13 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import perf_counter
+from urllib.parse import urljoin
 
 import httpx
 from pydantic import BaseModel
 
 from seo_scout.models import RedirectHop
-from seo_scout.urls import looks_binary, normalize, same_site
+from seo_scout.urls import looks_binary, same_site
 
 log = logging.getLogger("seo_scout.crawler.fetch")
 
@@ -98,7 +99,9 @@ class Fetcher:
             if attempt.status not in _REDIRECTS or not location:
                 return self._result(url, current, attempt, chain, started)
             chain.append(RedirectHop(url=current, status=attempt.status))
-            target = normalize(location, current) or location
+            # Request exactly what the server named. normalize() collapses trailing
+            # slashes for dedupe, which would turn /a -> /a/ into a self-loop.
+            target = urljoin(current, location)
             if not same_site(url, target):
                 attempt.skipped = "off_site_redirect"
                 return self._result(url, target, attempt, chain, started)

@@ -173,3 +173,22 @@ so the screenshot is reproducible from one headless-browser command that lives i
 the sample output block and the cost table are the literal output and arithmetic of the code as
 committed; the CLAUDE.md "pending" list records the two things that need a human (a GitHub
 token scope and an API key) so the next session does not rediscover them.
+
+## Post-launch — Redirect targets are requested verbatim
+
+**What happened.** The first crawl of `peps.python.org` recorded 17 of 20 pages as
+`too_many_redirects` after a single 301. The server redirects `/pep-0008` to `/pep-0008/`;
+the fetcher ran the `Location` header through `normalize()`, which collapses trailing slashes
+for frontier dedupe, and so requested `/pep-0008` again, ten times.
+
+**Root cause, not symptom.** `normalize()` answers "is this the same page?"; it was being asked
+"what should I request next?". Those are different questions. The fix asks the right one:
+`fetch()` now resolves `Location` with plain `urljoin()` and requests exactly what the server
+named. `final_url` therefore keeps the server's spelling, which is also the correct base for
+resolving the page's relative links. The one downstream consumer that needs identity, the
+frontier's `mark_seen`, normalizes on its side.
+
+**Failure mode prevented.** Any site that canonicalises with a trailing slash (GitHub Pages,
+most static hosts, Django's `APPEND_SLASH`) was invisible to the audit beyond its home page.
+The regression tests pin both halves: the fetcher follows `/a -> /a/`, and the crawler treats
+a later link to `/a` as the page it already has.

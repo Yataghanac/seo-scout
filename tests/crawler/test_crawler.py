@@ -283,3 +283,22 @@ async def test_unreachable_robots_fails_the_run_loudly(
     assert report.error is not None
     assert "robots.txt" in report.error
     assert not home.called
+
+
+@respx.mock
+async def test_trailing_slash_redirect_target_is_not_fetched_twice(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    """/x -> /x/ is followed, and a later link to /x (or /x/) is the same page, not a new one."""
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/x")))
+    respx.get("https://e.com/x").mock(return_value=httpx.Response(301, headers={"location": "/x/"}))
+    slashed = respx.get("https://e.com/x/").mock(
+        return_value=httpx.Response(200, html=html("/x", "/x/"))
+    )
+    report = await make(conn, client).run("https://e.com/")
+    pages = {p.url: p for p in repo_pages.list_pages(conn, report.run_id)}
+    assert set(pages) == {"https://e.com/", "https://e.com/x"}
+    assert pages["https://e.com/x"].final_url == "https://e.com/x/"
+    assert pages["https://e.com/x"].status == 200
+    assert slashed.call_count == 1

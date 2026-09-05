@@ -192,7 +192,7 @@ class Crawler:
             self._record_failure(state, url, depth, str(exc))
             return
         state.consecutive_failures = 0
-        state.frontier.mark_seen(result.final_url)
+        state.frontier.mark_seen(normalize(result.final_url) or result.final_url)
         repo_pages.insert_page(self._conn, state.run_id, _to_page(result, depth))
         state.fetched += 1
         log.debug("fetched", extra={"url": url, "status": result.status, "skipped": result.skipped})

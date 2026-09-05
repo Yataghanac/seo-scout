@@ -115,7 +115,7 @@ Other deliberate choices:
 
 GPT-4o at $2.50 / 1M prompt tokens and $10.00 / 1M completion tokens (table in `config.py`,
 priced as of 2026-09). A page request is the system prompt plus up to 4,000 characters of page
-text, so 500–1,300 prompt tokens depending on how much body text the page has, and under 100
+text, so 450–1,650 prompt tokens depending on how much body text the page has, and under 100
 completion tokens:
 
 | | per page | 50-page crawl |
@@ -128,6 +128,9 @@ Measured on `books.toscrape.com` (50 pages, 2026-09-05): 50 calls, 0 repairs, 0 
 685 prompt tokens per page on average (528–867), 59 completion tokens, **$0.1153 total**
 ($0.0023 per page). Catalogue pages are short; text-heavy pages sit at the top of the range.
 A second `report` run of the same site the same day: 50 cache hits, 0 calls, $0.0000.
+Measured on `peps.python.org` (20 pages, text-heavy, 2026-09-05): 18 pages sent, 16 first
+attempts + 5 repairs = 21 calls, 0 rejections, prompts up to 1,613 tokens, **$0.0746 total**
+($0.0041 per page). That run is the top of the table above, repairs included.
 
 The pre-flight estimate reserves the full completion budget, so it over-estimates slightly and
 the `--max-cost` gate errs on the side of stopping early. Measured totals appear in the CLI

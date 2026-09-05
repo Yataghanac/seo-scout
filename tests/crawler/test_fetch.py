@@ -175,3 +175,16 @@ async def test_timeout_counts_as_network_error(client: httpx.AsyncClient) -> Non
     respx.get("https://e.com/").mock(side_effect=httpx.ReadTimeout("slow"))
     with pytest.raises(NetworkError):
         await make(client, Sleeps()).fetch("https://e.com/")
+
+
+@respx.mock
+async def test_redirect_to_trailing_slash_variant_is_followed(client: httpx.AsyncClient) -> None:
+    """A 301 from /a to /a/ must be requested as sent, not re-normalised back to /a."""
+    respx.get("https://e.com/a").mock(return_value=httpx.Response(301, headers={"location": "/a/"}))
+    slashed = respx.get("https://e.com/a/").mock(return_value=httpx.Response(200, html="<p>a</p>"))
+    r = await make(client, Sleeps()).fetch("https://e.com/a")
+    assert slashed.called
+    assert r.status == 200
+    assert r.skipped is None
+    assert r.final_url == "https://e.com/a/"
+    assert [(h.url, h.status) for h in r.redirect_chain] == [("https://e.com/a", 301)]
