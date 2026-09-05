@@ -127,6 +127,7 @@ completion tokens:
 Measured on `books.toscrape.com` (50 pages, 2026-09-05): 50 calls, 0 repairs, 0 rejections,
 685 prompt tokens per page on average (528–867), 59 completion tokens, **$0.1153 total**
 ($0.0023 per page). Catalogue pages are short; text-heavy pages sit at the top of the range.
+A second `report` run of the same site the same day: 50 cache hits, 0 calls, $0.0000.
 
 The pre-flight estimate reserves the full completion budget, so it over-estimates slightly and
 the `--max-cost` gate errs on the side of stopping early. Measured totals appear in the CLI
