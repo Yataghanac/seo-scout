@@ -74,6 +74,7 @@
   .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; color: var(--muted); }
   .detail { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   @media (max-width: 1000px) { .detail { grid-template-columns: 1fr } }
+  @media (max-width: 1000px) { .start li { grid-template-columns: 24px 48px minmax(0, 1fr); } .start .m { grid-column: 2 / -1; } }
   .detail h3 { font: 700 15px var(--serif); margin: 0 0 8px; }
   .issue { padding: 8px 0; border-bottom: 1px dashed var(--line); }
   .issue .m { color: var(--muted); font-size: 13px; margin-top: 2px; }
@@ -90,6 +91,20 @@
   .reason.repaired { color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); }
   .diag { margin-top: 10px; color: var(--muted); font-style: italic; font-family: var(--serif); }
   .empty { color: var(--faint); padding: 30px; text-align: center; }
+  .help { display: flex; gap: 12px; align-items: center; color: var(--muted); font-size: 13px; border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; }
+  .help button, .copy { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 4px; padding: 2px 8px; font: inherit; font-size: 11px; cursor: pointer; }
+  .help button { margin-left: auto; white-space: nowrap; }
+  .copy { text-transform: none; letter-spacing: 0; margin-left: 8px; }
+  .copy:hover { color: var(--accent); border-color: var(--accent); }
+  .start ol { list-style: none; margin: 0; padding: 0; counter-reset: n; }
+  .start li { display: grid; grid-template-columns: 24px 48px minmax(0, 1.1fr) minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 7px 0; border-bottom: 1px dashed var(--line); cursor: pointer; counter-increment: n; }
+  .start li::before { content: counter(n); color: var(--faint); font-size: 12px; }
+  .start li:last-child { border-bottom: 0; }
+  .start li:hover .u { color: var(--accent); }
+  .start .sc { font: 700 18px var(--serif); font-variant-numeric: tabular-nums; }
+  .start .u { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .start .m { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .legend { display: inline-flex; gap: 8px; align-items: center; color: var(--faint); font-size: 12px; }
   .warn { border-left: 3px solid var(--warning); padding: 8px 12px; background: color-mix(in srgb, var(--warning) 10%, transparent); border-radius: 6px; }
   :root[data-still] .tile { animation: none; }
   @keyframes rise { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
@@ -107,6 +122,8 @@
 <main>
   <div id="notice" class="warn" hidden></div>
   <section class="tiles" id="tiles"></section>
+  <div id="help" class="help" hidden><span><b>How to read this.</b> The score is a triage order, not a grade. Fix the pages under <i>Start here</i> first, then work down the table. Coloured counts are critical / warning / notice issues; open a page for the fix and, when a rewrite was validated, a title and meta you can copy.</span><button id="help-x">got it</button></div>
+  <section class="panel start" id="start"><h2>Start here</h2><ol id="start-list"></ol></section>
   <section class="charts">
     <div class="panel"><h2>Score distribution</h2><div class="chart-wrap"><canvas id="hist"></canvas></div></div>
     <div class="panel"><h2>Issues by rule</h2><div class="chart-wrap"><canvas id="rules"></canvas></div></div>
@@ -117,6 +134,7 @@
       <select id="rule"><option value="">all rules</option></select>
       <select id="ai"><option value="">any AI status</option><option value="ok">ok</option><option value="repaired">repaired</option><option value="rejected">rejected</option><option value="skipped">skipped</option><option value="unavailable">unavailable</option></select>
       <input id="q" type="search" placeholder="filter by URL">
+      <span class="legend"><span class="pip critical">C</span>critical <span class="pip warning">W</span>warning <span class="pip notice">N</span>notice</span>
       <span class="count" id="count"></span>
     </div>
     <table>
@@ -150,6 +168,7 @@ async function init() {
     sel.appendChild(o);
   }
   sel.onchange = () => loadRun(Number(sel.value));
+  renderHelp();
   const wanted = Number(params.get("run")) || runs[0].id;
   sel.value = wanted;
   await loadRun(wanted);
@@ -162,8 +181,27 @@ async function loadRun(id) {
   const [summary, pages] = await Promise.all([api(`/api/runs/${id}/summary`), api(`/api/runs/${id}/pages?size=500&sort=score&order=asc`)]);
   state.summary = summary; state.pages = pages.items;
   $("#csv").href = `/api/runs/${id}/export.csv`; $("#json").href = `/api/runs/${id}/export.json`;
-  renderNotice(); renderTiles(); renderCharts(); renderRuleOptions(); renderTable(); $("#detail").hidden = true;
+  renderNotice(); renderTiles(); renderStart(); renderCharts(); renderRuleOptions(); renderTable(); $("#detail").hidden = true;
 }
+
+function renderHelp() {
+  let seen = false; try { seen = localStorage.getItem("seo-scout-help") === "1"; } catch (e) {}
+  $("#help").hidden = seen;
+  $("#help-x").onclick = () => { $("#help").hidden = true; try { localStorage.setItem("seo-scout-help", "1"); } catch (e) {} };
+}
+
+function headline(p) {
+  const i = p.issues.find((x) => x.severity === "critical") || p.issues.find((x) => x.severity === "warning") || p.issues[0];
+  return i ? i.message : "No issues on this page.";
+}
+
+function renderStart() {
+  const worst = [...state.pages].sort((a, b) => a.score - b.score).slice(0, 5);
+  $("#start-list").innerHTML = worst.map((p) => `<li data-url="${esc(p.url)}"><span class="sc">${p.score}</span><span class="u" title="${esc(p.url)}">${esc(p.url)}</span><span class="m">${esc(headline(p))}</span></li>`).join("") || '<li class="empty">No pages audited in this run.</li>';
+  for (const li of $("#start-list").querySelectorAll("li[data-url]")) li.onclick = () => showDetail(li.dataset.url);
+}
+
+function copyBtn(text) { return `<button class="copy" data-copy="${esc(text)}">copy</button>`; }
 
 function renderNotice() {
   const run = state.summary.run, n = $("#notice");
@@ -256,9 +294,9 @@ function showDetail(url) {
     const proposed = ai.status === "ok" || ai.status === "repaired";
     aiHtml = `<div class="ba">
       <div class="box"><div class="k">current title ${lenTag(ai.original_title, 30, 60)}</div><div class="t">${esc(ai.original_title) || "<i>missing</i>"}</div></div>
-      <div class="box after"><div class="k">proposed title ${proposed ? lenTag(ai.title, 30, 60) : ""}</div><div class="t">${proposed ? esc(ai.title) : "<i>no validated suggestion</i>"}</div></div>
+      <div class="box after"><div class="k">proposed title <span>${proposed ? lenTag(ai.title, 30, 60) + copyBtn(ai.title) : ""}</span></div><div class="t">${proposed ? esc(ai.title) : "<i>no validated suggestion</i>"}</div></div>
       <div class="box"><div class="k">current meta ${lenTag(ai.original_meta, 70, 160)}</div><div class="d">${esc(ai.original_meta) || "<i>missing</i>"}</div></div>
-      <div class="box after"><div class="k">proposed meta ${proposed ? lenTag(ai.meta_description, 70, 160) : ""}</div><div class="d">${proposed ? esc(ai.meta_description) : "<i>no validated suggestion</i>"}</div></div>
+      <div class="box after"><div class="k">proposed meta <span>${proposed ? lenTag(ai.meta_description, 70, 160) + copyBtn(ai.meta_description) : ""}</span></div><div class="d">${proposed ? esc(ai.meta_description) : "<i>no validated suggestion</i>"}</div></div>
     </div>
     <p>Verdict: <span class="badge ${ai.status}">${ai.status}</span> ${ai.status === "repaired" ? "— first answer failed validation; the single repair attempt passed" : ai.status === "ok" ? "— passed validation on the first attempt" : ai.status === "rejected" ? "— failed validation twice; the deterministic issue stands" : ""} ${ai.cached ? "· served from cache ($0)" : `· $${(ai.cost_usd || 0).toFixed(4)}`}</p>
     ${ai.diagnosis ? `<div class="diag">“${esc(ai.diagnosis)}”</div>` : ""}
@@ -267,6 +305,10 @@ function showDetail(url) {
   $("#detail").hidden = false;
   $("#detail").innerHTML = `<h2><a href="${esc(p.final_url)}" target="_blank" rel="noopener">${esc(p.url)}</a> <span class="len">score ${p.score} · HTTP ${p.status} · depth ${p.depth} · ${p.elapsed_ms} ms · ${(p.bytes / 1024).toFixed(0)} KB</span></h2>
     <div class="detail"><div><h3>Issues (${p.issues.length})</h3>${issues}</div><div><h3>Before / after</h3>${aiHtml}</div></div>`;
+  for (const b of $("#detail").querySelectorAll(".copy")) b.onclick = async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = "copied"; } catch (e) { b.textContent = "select & copy"; }
+    setTimeout(() => { b.textContent = "copy"; }, 1500);
+  };
   if (!params.has("page")) $("#detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 

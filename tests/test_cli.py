@@ -1,9 +1,12 @@
 from contextlib import closing
+from pathlib import Path
 
 import httpx
+import pytest
 import respx
 from typer.testing import CliRunner
 
+from seo_scout import cli
 from seo_scout.cli import app
 from seo_scout.store import db, repo_runs
 
@@ -87,3 +90,63 @@ def test_crawl_no_ai_flag_skips_the_stage() -> None:
     result = runner.invoke(app, ["crawl", "https://e.com/", "--delay", "0", "--no-ai"])
     assert result.exit_code == 0, result.output
     assert "ai:" not in result.stdout
+
+
+def test_init_creates_env_from_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env.example").write_text("OPENAI_API_KEY=\nSEO_SCOUT_DB=seo_scout.db\n")
+    result = runner.invoke(app, ["init"])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / ".env").read_text() == "OPENAI_API_KEY=\nSEO_SCOUT_DB=seo_scout.db\n"
+    assert "OPENAI_API_KEY" in result.output
+    assert "crawl" in result.output
+
+
+def test_init_never_overwrites_an_existing_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env.example").write_text("OPENAI_API_KEY=\n")
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=sk-keep\n")
+    result = runner.invoke(app, ["init"])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / ".env").read_text() == "OPENAI_API_KEY=sk-keep\n"
+    assert "already exists" in result.output
+
+
+def test_init_without_template_writes_a_minimal_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["init"])
+    assert result.exit_code == 0, result.output
+    assert "OPENAI_API_KEY=" in (tmp_path / ".env").read_text()
+
+
+def test_serve_open_launches_the_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(cli, "_open_later", opened.append)
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: None)
+    result = runner.invoke(app, ["serve", "--open", "--port", "8765", "--db", ":memory:"])
+    assert result.exit_code == 0, result.output
+    assert opened == ["http://127.0.0.1:8765"]
+
+
+def test_serve_without_open_does_not_launch_the_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(cli, "_open_later", opened.append)
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: None)
+    result = runner.invoke(app, ["serve", "--db", ":memory:"])
+    assert result.exit_code == 0, result.output
+    assert opened == []
+
+
+@respx.mock
+def test_crawl_prints_the_next_step(tmp_path: Path) -> None:
+    respx.get("https://e.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html="<p>x</p>"))
+    args = ["crawl", "https://e.com/", "--no-ai", "--db", str(tmp_path / "t.db")]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert "next: seo-scout serve --open" in result.output

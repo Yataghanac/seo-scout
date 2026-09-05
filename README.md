@@ -8,24 +8,37 @@ results in a dashboard. Self-hosted, one SQLite file, one command.
 
 ## Quickstart
 
+Three commands. You need Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+
 ```bash
-git clone https://github.com/Yataghanac/seo-scout && cd seo-scout
-uv sync
+git clone https://github.com/Yataghanac/seo-scout && cd seo-scout && uv sync
+uv run seo-scout init                                   # writes .env; add OPENAI_API_KEY to enable rewrites
 uv run seo-scout crawl https://books.toscrape.com --max-pages 50
-uv run seo-scout serve            # http://127.0.0.1:8000
+uv run seo-scout serve --open                           # opens the dashboard in your browser
 ```
 
-Copy `.env.example` to `.env` and set `OPENAI_API_KEY` to enable the AI stage. Without a key
-the tool runs the deterministic audit only and prints one warning; nothing else changes.
+What you will see:
+
+- **Start here**: the five weakest pages and the one thing wrong with each. Work from the top.
+- **Tiles and charts**: the overall score, issue counts by severity and by rule.
+- **The table**: every page, filterable by severity, rule, AI status or URL. Click a page.
+- **Before / after**: for each weak page, the current title and meta beside a validated
+  rewrite with a copy button. A verdict line says whether the model passed first time,
+  needed a repair, or was rejected, and why.
+
+Without an API key everything above still works except the rewrites; the tool prints one
+warning and moves on. A typical keyed run of 50 pages ends like this:
 
 ```
 run 1: complete, 50 pages in 26.1s
 audit: 50 pages, average score 87.3, 187 issues (100 notice, 87 warning)
 ai: 50 pages considered, 50 ok, 0 repaired, 0 rejected, 0 cached, 0 skipped; 50 calls, $0.1153
+next: seo-scout serve --open
 ```
 
-Without a key the last line reads `50 skipped; 0 calls, $0.0000` followed by
-`warning: OPENAI_API_KEY unset: deterministic results only`.
+To watch a site over time, schedule `seo-scout report https://example.com` instead of
+`crawl`: it diffs against the last run, writes a report file and can post to Slack
+(see [Run diffs and automation](#run-diffs-and-automation)).
 
 Other commands: `seo-scout audit <run>` re-runs the rules, `seo-scout ai <run>` runs the AI
 stage on a stored run, `seo-scout diff <a> <b>` compares two runs, `seo-scout report <url>`
@@ -193,6 +206,9 @@ JavaScript rendering, user accounts, Postgres, Docker, keyword rank tracking, ba
 competitor comparison, a React frontend, or any integration platform. The point of this project
 is a small thing that fully works and can be explained end to end.
 
-## License
+## License and commercial use
 
-MIT
+MIT, see [LICENSE](LICENSE). You may deploy it for clients, host it, and charge for setup,
+hosting, adaptation and support. [docs/commercial.md](docs/commercial.md) states exactly what
+data leaves the customer's machine, what it costs, what the tool will not do, and gives
+support and liability wording you can adapt.

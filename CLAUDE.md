@@ -8,7 +8,8 @@ Portfolio project; every design decision must be explainable (see DECISIONS.md).
 ```bash
 uv sync                                  # install (set UV_SYSTEM_CERTS=1 on this machine)
 uv run seo-scout crawl https://site --max-pages 50
-uv run seo-scout serve                   # dashboard on :8000
+uv run seo-scout init                    # .env from template (never overwrites)
+uv run seo-scout serve --open            # dashboard on :8000, opens the browser
 uv run seo-scout diff 1 2 [--json]       # compare two runs
 uv run seo-scout report https://site     # crawl + diff vs last run + reports/ + Slack
 uv run pytest                            # offline, < 15 s
@@ -52,8 +53,8 @@ Serve the project DB, then capture with headless Chrome/Edge (dark theme, first 
 
 ```bash
 uv run seo-scout serve &
-chrome --headless --hide-scrollbars --window-size=1440,1180 --virtual-time-budget=8000 \
-  --screenshot=docs/screenshot.png "http://127.0.0.1:8000/?theme=dark&still=1&size=6&page=first"
+chrome --headless --hide-scrollbars --window-size=1440,1750 --virtual-time-budget=8000 \
+  --screenshot=docs/screenshot.png "http://127.0.0.1:8000/?run=1&theme=dark&still=1&size=6&page=first"
 ```
 
 Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<id>`,

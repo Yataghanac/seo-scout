@@ -228,3 +228,24 @@ sitemaps still take priority and skip both guesses.
 are the first N seeds, so a site that gains a sitemap between two runs will show a large
 added/removed diff that is churn, not change. The diff report is honest about it either way;
 this note exists so nobody reads that churn as a regression.
+
+## Post-launch — Ease-of-use pass and commercial footing
+
+**What changed.** `seo-scout init` writes `.env` from the template (never overwrites);
+`serve --open` launches the browser; `crawl` and `report` end with the next command to run.
+The dashboard gained a *Start here* list (five weakest pages, each with its headline issue),
+a legend for the severity pips, a dismissable one-line "how to read this" strip, and copy
+buttons on every validated title and meta. README leads with three commands and what the
+reader will see; the rationale moved below. A `LICENSE` (MIT) and `docs/commercial.md` were
+added. Design note: `docs/superpowers/specs/2026-09-05-ease-of-use-design.md`.
+
+**Why these and not more.** Each one removes a specific question a first-time user asks:
+"where do I start", "what do the coloured dots mean", "how do I get this text into the
+CMS", "what do I run next". None adds a dependency, an API call, or a build step; the
+dashboard is still one static file and the CLI is still one module under 400 lines.
+
+**Commercial decision.** The code stays public under MIT. The saleable things are setup,
+hosting, adaptation and support, and `docs/commercial.md` exists so a buyer's first three
+questions (what leaves my machine, what does it cost, what will it not do) are answered in
+writing before the demo. Selling source licences for code already public under MIT would
+not survive a customer's lawyer, so that path was closed deliberately.

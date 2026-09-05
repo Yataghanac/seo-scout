@@ -6,6 +6,8 @@ import asyncio
 import json
 import sqlite3
 import ssl
+import threading
+import webbrowser
 from contextlib import closing
 from pathlib import Path
 from typing import Annotated, Any
@@ -46,6 +48,20 @@ def version() -> None:
 
 
 @app.command()
+def init() -> None:
+    """Create .env from .env.example so the next step is just `crawl`."""
+    env, template = Path(".env"), Path(".env.example")
+    if env.exists():
+        typer.echo(f"{env} already exists; edit it to change settings.")
+    else:
+        text = template.read_text(encoding="utf-8") if template.exists() else _MINIMAL_ENV
+        env.write_text(text, encoding="utf-8")
+        typer.echo(f"wrote {env}")
+    typer.echo("optional: set OPENAI_API_KEY in .env to enable validated title/meta rewrites")
+    typer.echo("next: seo-scout crawl https://example.com --max-pages 50")
+
+
+@app.command()
 def crawl(
     url: Annotated[str, typer.Argument(help="Site to crawl, e.g. https://example.com")],
     max_pages: Annotated[int | None, typer.Option(help="Stop after N pages (<= config)")] = None,
@@ -62,7 +78,9 @@ def crawl(
 ) -> None:
     """Crawl a site, audit it, and propose validated title/meta rewrites."""
     settings = _setup(_settings(delay, db_path, max_cost, ai_concurrency), verbose)
-    _run(_crawl(settings, url, max_pages, max_depth, dry_run, no_ai))
+    run_id = _run(_crawl(settings, url, max_pages, max_depth, dry_run, no_ai))
+    if run_id is not None:
+        _next_step()
 
 
 @app.command()
@@ -92,10 +110,14 @@ def serve(
     port: Annotated[int, typer.Option(help="Port for the dashboard")] = 8000,
     host: Annotated[str, typer.Option(help="Bind address")] = "127.0.0.1",
     db_path: DbOpt = None,
+    open_browser: Annotated[bool, typer.Option("--open", help="Open the dashboard")] = False,
 ) -> None:
     """Serve the dashboard and JSON API."""
     settings = _settings(None, db_path, None, None)
-    typer.echo(f"dashboard: http://{host}:{port}  (db: {settings.db})")
+    url = f"http://{host}:{port}"
+    typer.echo(f"dashboard: {url}  (db: {settings.db})")
+    if open_browser:
+        _open_later(url)
     uvicorn.run(create_app(settings.db), host=host, port=port, log_level="warning")
 
 
@@ -148,9 +170,25 @@ def report(
     if result is not None and settings.slack_webhook_url:
         posted = _run(post_slack(settings.slack_webhook_url, slack_summary(result, url)))
         typer.echo("slack: posted" if posted else "slack: failed (see logs)", err=not posted)
+    _next_step()
 
 
 # --- helpers ---------------------------------------------------------------------------------
+
+_MINIMAL_ENV = (
+    "# Optional. Without OPENAI_API_KEY the deterministic audit still runs.\n"
+    "OPENAI_API_KEY=\n"
+    "SEO_SCOUT_DB=seo_scout.db\n"
+)
+
+
+def _next_step() -> None:
+    typer.echo("next: seo-scout serve --open", err=True)
+
+
+def _open_later(url: str, delay_s: float = 0.8) -> None:
+    """Open the browser once uvicorn has had a moment to bind; never blocks the server."""
+    threading.Timer(delay_s, webbrowser.open, [url]).start()
 
 
 def _settings(
