@@ -156,6 +156,7 @@ async def _attempt(ctx: _Ctx, facts: PageFacts) -> _Outcome:
     messages = build_messages(facts)
     calls: list[_Call] = []
     violations: list[Violation] = []
+    first_failure: str | None = None
     for kind in ("initial", "repair"):
         if ctx.unavailable_reason:
             return _Outcome("unavailable", reason=ctx.unavailable_reason, calls=calls)
@@ -184,7 +185,9 @@ async def _attempt(ctx: _Ctx, facts: PageFacts) -> _Outcome:
         calls.append(_Call(kind, completion.prompt_tokens, completion.completion_tokens, usd))
         suggestion, violations = _parse_and_validate(completion, facts)
         if not violations and suggestion is not None:
-            return _Outcome("ok" if kind == "initial" else "repaired", suggestion, calls=calls)
+            status = "ok" if kind == "initial" else "repaired"
+            return _Outcome(status, suggestion, reason=first_failure, calls=calls)
+        first_failure = "first attempt failed validation:\n" + summarize_violations(violations)
         previous: Suggestion | str = suggestion or completion.content or completion.refusal or ""
         messages = build_messages(facts, previous=previous, violations=violations)
     return _Outcome("rejected", reason=summarize_violations(violations), calls=calls)

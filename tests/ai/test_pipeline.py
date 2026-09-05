@@ -147,6 +147,10 @@ async def test_invalid_suggestion_is_repaired_once_then_accepted(conn: sqlite3.C
     (row,) = repo_ai.list_suggestions(conn, run_id)
     assert row.status == "repaired"
     assert row.title == GOOD_TITLE
+    # The first attempt's violations are kept so the dashboard can say why a repair happened.
+    assert row.reason is not None
+    assert row.reason.startswith("first attempt failed validation:")
+    assert "title" in row.reason and ("too_short" in row.reason or "claim" in row.reason)
 
 
 async def test_second_failure_rejects_and_keeps_nothing_unvalidated(

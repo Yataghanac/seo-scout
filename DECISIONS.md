@@ -192,3 +192,21 @@ frontier's `mark_seen`, normalizes on its side.
 most static hosts, Django's `APPEND_SLASH`) was invisible to the audit beyond its home page.
 The regression tests pin both halves: the fetcher follows `/a -> /a/`, and the crawler treats
 a later link to `/a` as the page it already has.
+
+## Post-launch — Repaired suggestions keep the first attempt's violations
+
+**What happened.** The first text-heavy live run (`peps.python.org`) triggered five repairs.
+The dashboard could say *that* a repair happened but not *why*: `reason` was only written on
+rejection, so the evidence of what the model got wrong the first time was thrown away the
+moment the second answer passed.
+
+**Decision.** A `repaired` outcome now carries `"first attempt failed validation:"` plus the
+same violation summary the model was shown. It rides the existing `reason` column, the cache
+row and the CSV export unchanged; the dashboard renders it in the warning colour instead of
+the rejection red so a repaired page does not read as a failure.
+
+**Why it matters for the design.** The validator is the argument for the whole AI layer. A
+reviewer should be able to open any repaired page and see the exact check that caught the
+first answer, which is the difference between "we validate" and "here is the validation
+working". It also gives a cheap signal for prompt tuning: if the same code dominates the
+repair reasons, the prompt, not the validator, is what to fix.

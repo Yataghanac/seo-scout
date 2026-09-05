@@ -89,8 +89,8 @@ until it passes [`ai/validate.py`](src/seo_scout/ai/validate.py):
 
 On failure the model gets **one** repair attempt with the exact violations listed. On a second
 failure the suggestion is discarded, the deterministic issue stands, and the page is recorded
-as `rejected` with the reason, which the dashboard shows verbatim. An unvalidated suggestion
-never reaches the user.
+as `rejected` with the reason, which the dashboard shows verbatim. A `repaired` page keeps the
+first attempt's violations for the same reason. An unvalidated suggestion never reaches the user.
 
 Other deliberate choices:
 

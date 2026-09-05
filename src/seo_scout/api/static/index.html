@@ -87,6 +87,7 @@
   .len { color: var(--faint); font-weight: 400; letter-spacing: 0; text-transform: none; }
   .len.bad { color: var(--critical); }
   .reason { white-space: pre-wrap; color: var(--critical); background: color-mix(in srgb, var(--critical) 8%, transparent); border-radius: 8px; padding: 10px 12px; margin-top: 10px; font-size: 13px; }
+  .reason.repaired { color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); }
   .diag { margin-top: 10px; color: var(--muted); font-style: italic; font-family: var(--serif); }
   .empty { color: var(--faint); padding: 30px; text-align: center; }
   .warn { border-left: 3px solid var(--warning); padding: 8px 12px; background: color-mix(in srgb, var(--warning) 10%, transparent); border-radius: 6px; }
@@ -261,7 +262,7 @@ function showDetail(url) {
     </div>
     <p>Verdict: <span class="badge ${ai.status}">${ai.status}</span> ${ai.status === "repaired" ? "— first answer failed validation; the single repair attempt passed" : ai.status === "ok" ? "— passed validation on the first attempt" : ai.status === "rejected" ? "— failed validation twice; the deterministic issue stands" : ""} ${ai.cached ? "· served from cache ($0)" : `· $${(ai.cost_usd || 0).toFixed(4)}`}</p>
     ${ai.diagnosis ? `<div class="diag">“${esc(ai.diagnosis)}”</div>` : ""}
-    ${ai.reason ? `<div class="reason">${esc(ai.reason)}</div>` : ""}`;
+    ${ai.reason ? `<div class="reason ${ai.status}">${esc(ai.reason)}</div>` : ""}`;
   }
   $("#detail").hidden = false;
   $("#detail").innerHTML = `<h2><a href="${esc(p.final_url)}" target="_blank" rel="noopener">${esc(p.url)}</a> <span class="len">score ${p.score} · HTTP ${p.status} · depth ${p.depth} · ${p.elapsed_ms} ms · ${(p.bytes / 1024).toFixed(0)} KB</span></h2>
