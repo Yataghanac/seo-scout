@@ -61,10 +61,11 @@ Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<i
 
 ## Pending (needs a human)
 
+Done 2026-09-05: live AI pass on run 1 (50 calls, $0.1153), README cost section and screenshot
+updated. `OPENAI_API_KEY` lives in `.env` (gitignored); never in `.env.example`.
+
 - `gh auth refresh -h github.com -s workflow`, then `git push -u origin main` (the token
   lacks the `workflow` scope needed to push `.github/workflows/ci.yml`).
-- Put `OPENAI_API_KEY` in `.env`, run `uv run seo-scout ai 1 --max-cost 0.5`, retake the
-  screenshot, and paste the measured cost into README "Cost characteristics".
 
 ## Workflow
 

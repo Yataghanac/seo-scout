@@ -21,9 +21,11 @@ the tool runs the deterministic audit only and prints one warning; nothing else 
 ```
 run 1: complete, 50 pages in 26.1s
 audit: 50 pages, average score 87.3, 187 issues (100 notice, 87 warning)
-ai: 50 pages considered, 0 ok, 0 repaired, 0 rejected, 0 cached, 50 skipped; 0 calls, $0.0000
-warning: OPENAI_API_KEY unset: deterministic results only
+ai: 50 pages considered, 50 ok, 0 repaired, 0 rejected, 0 cached, 0 skipped; 50 calls, $0.1153
 ```
+
+Without a key the last line reads `50 skipped; 0 calls, $0.0000` followed by
+`warning: OPENAI_API_KEY unset: deterministic results only`.
 
 Other commands: `seo-scout audit <run>` re-runs the rules, `seo-scout ai <run>` runs the AI
 stage on a stored run, `seo-scout diff <a> <b>` compares two runs, `seo-scout report <url>`
@@ -112,14 +114,19 @@ Other deliberate choices:
 ## Cost characteristics
 
 GPT-4o at $2.50 / 1M prompt tokens and $10.00 / 1M completion tokens (table in `config.py`,
-priced as of 2026-09). A page request is roughly 1,000–1,300 prompt tokens (system prompt plus
-up to 4,000 characters of page text) and under 100 completion tokens, so:
+priced as of 2026-09). A page request is the system prompt plus up to 4,000 characters of page
+text, so 500–1,300 prompt tokens depending on how much body text the page has, and under 100
+completion tokens:
 
 | | per page | 50-page crawl |
 |---|---|---|
-| first attempt passes | ≈ $0.004 | ≈ $0.15–0.20 |
-| repair needed | ≈ $0.008 | worst case ≈ $0.40 |
+| first attempt passes | ≈ $0.002–0.004 | ≈ $0.12–0.20 |
+| repair needed | ≈ $0.004–0.008 | worst case ≈ $0.40 |
 | unchanged page, second run | $0.00 | $0.00 |
+
+Measured on `books.toscrape.com` (50 pages, 2026-09-05): 50 calls, 0 repairs, 0 rejections,
+685 prompt tokens per page on average (528–867), 59 completion tokens, **$0.1153 total**
+($0.0023 per page). Catalogue pages are short; text-heavy pages sit at the top of the range.
 
 The pre-flight estimate reserves the full completion budget, so it over-estimates slightly and
 the `--max-cost` gate errs on the side of stopping early. Measured totals appear in the CLI
