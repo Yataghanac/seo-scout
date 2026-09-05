@@ -1,6 +1,6 @@
 import pytest
 
-from seo_scout.urls import looks_binary, normalize, same_site
+from seo_scout.urls import link_pair, looks_binary, normalize, resolve, same_site
 
 
 @pytest.mark.parametrize(
@@ -64,3 +64,30 @@ def test_same_site(a: str, b: str, expected: bool) -> None:
 )
 def test_looks_binary(url: str, expected: bool) -> None:
     assert looks_binary(url) is expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("https://user:pw@example.com/a/", "https://example.com/a/"),  # never send Basic auth
+        ("HTTPS://Example.com:443/A/", "https://example.com/A/"),
+        ("http://example.com:8080/x/", "http://example.com:8080/x/"),
+        ("http://[::1]:8000/x/", "http://[::1]:8000/x/"),
+        ("https://example.com/a?b=2&a=1#frag", "https://example.com/a?b=2&a=1"),
+    ],
+)
+def test_resolve_rebuilds_the_netloc_but_keeps_the_spelling(raw: str, expected: str) -> None:
+    assert resolve(raw) == expected
+
+
+def test_normalize_keeps_ipv6_brackets() -> None:
+    assert normalize("http://[::1]:8000/x/") == "http://[::1]:8000/x"
+
+
+def test_link_pair_returns_identity_key_and_request_spelling() -> None:
+    assert link_pair("/a/?b=2&a=1#f", "https://example.com/") == (
+        "https://example.com/a?a=1&b=2",
+        "https://example.com/a/?b=2&a=1",
+    )
+    assert link_pair("mailto:a@b.c", "https://example.com/") is None
+    assert link_pair("/a", None) is None

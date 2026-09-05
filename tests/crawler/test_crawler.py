@@ -334,3 +334,38 @@ async def test_start_url_is_requested_as_given(
     assert home.call_count == 1
     assert pages["https://e.com/docs"].final_url == "https://e.com/docs/"
     assert pages["https://e.com/docs"].redirect_chain == []
+
+
+@respx.mock
+async def test_robots_is_checked_on_the_spelling_that_gets_requested(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    """`Disallow: /private/` allows /private but not /private/; the check must see the slash."""
+    respx.get("https://e.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nDisallow: /private/\n")
+    )
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/private/")))
+    private = respx.get("https://e.com/private/").mock(
+        return_value=httpx.Response(200, html=html())
+    )
+    report = await make(conn, client).run("https://e.com/")
+    assert not private.called
+    assert set(urls(conn, report.run_id)) == {"https://e.com/"}
+
+
+@respx.mock
+async def test_dry_run_and_crawl_agree_on_a_disallowed_seed(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    respx.get("https://e.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nDisallow: /private/\n")
+    )
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/private/sitemap.xml").mock(return_value=httpx.Response(404))
+    seed = respx.get("https://e.com/private/").mock(return_value=httpx.Response(200, html=html()))
+    crawler = make(conn, client)
+    assert await crawler.plan("https://e.com/private/") == []
+    report = await crawler.run("https://e.com/private/")
+    assert not seed.called
+    assert report.pages == 0

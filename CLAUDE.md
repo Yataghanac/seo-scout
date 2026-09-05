@@ -65,37 +65,9 @@ chrome --headless --hide-scrollbars --window-size=1440,1750 --virtual-time-budge
 Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<id>`,
 `?page=first|<url>`.
 
-## Pending (open review findings, 2026-09-06)
+## Pending
 
-A second code review of commit d3797d8 (identity-vs-request URL fix) found these. None are
-fixed yet. Fix in this order, tests first; 1-4 are confirmed regressions.
-
-1. `audit/page.py:69` broken_links regression: `parsed.links` are now request spellings but
-   `status_by_url` is keyed by normalized page ids, so `<a href="/dead/">` to a 404 is never
-   reported. Root fix: parser returns (key, request) pairs; audit and crawler consume keys.
-2. `crawler/crawler.py:233` robots checked on the normalized key, fetched on the request
-   spelling; `Disallow: /private/` allows `/private` but not `/private/`. Also `plan()` checks
-   the verbatim seed so dry-run and crawl disagree. Check `policy.allowed(request)`.
-3. `urls.py:36` `resolve()` keeps `user:pw@` (uses `parts.netloc`); httpx sends Basic auth
-   and the credential URL is stored. Rebuild netloc from hostname+port like `normalize()`.
-4. `ai/pipeline.py:192` `prior = violations` runs on both iterations, so a rejected reason
-   repeats the repair violations and loses the first attempt's. Snapshot after initial only;
-   test with two different violation codes.
-5. `parse.py:64` key computed, discarded, recomputed: 3-4 URL parses per anchor (~6.5 s on
-   150k links vs ~1.8 s). Same structural fix as 1.
-6. `crawler/fetch.py:106` loop check is exact string equality; case/port-only Location and
-   A->B->A cycles still burn 10 hops. Need a "wire form" (casefold host, drop default port
-   and fragment, keep path/query) compared against current plus every hop in the chain.
-7. `crawler/sitemap.py:66` prefix guess tries only the full start path: `/uv/guides/` never
-   finds `/uv/sitemap.xml`; `/docs/index.html` guesses under the file. Walk parents
-   deepest-first (bounded), skip a trailing segment with an extension, stop on first hit.
-8. `audit/service.py:50` `worst_pages` still includes clean pages for export/report/Slack;
-   dashboard filters client-side and its `byUrl.get(...) || {issues: []}` fallback renders
-   "No issues" for a page that has them. Exclude no-issue pages in `summarize_run`.
-9. `cli.py:190` next-step hint prints an unquoted `--db` path (breaks on spaces); also
-   `_browser_url` double-brackets `[::1]`.
-10. `crawler/frontier.py:14` `request` default re-enables the normalized fetch for any caller
-    that omits it. Make it required.
+Nothing open. The two review passes of 2026-09-06 are fixed and recorded in DECISIONS.md.
 
 ## Workflow
 

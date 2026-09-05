@@ -41,13 +41,15 @@ def audit_run(conn: sqlite3.Connection, run_id: int) -> RunSummary:
 
 
 def summarize_run(conn: sqlite3.Connection, run_id: int) -> RunSummary:
+    """`worst_pages` lists only pages with issues: it is a to-do list, not a ranking."""
     scores = repo_issues.scores_by_url(conn, run_id)
     issues = repo_issues.list_issues(conn, run_id)
     per_page: Counter[str] = Counter(i.url for i in issues)
     distribution = {b: 0 for b in BUCKETS}
     for score in scores.values():
         distribution[bucket(score)] += 1
-    worst = sorted(scores.items(), key=lambda kv: (kv[1], -per_page[kv[0]], kv[0]))
+    flawed = [(url, score) for url, score in scores.items() if per_page[url]]
+    worst = sorted(flawed, key=lambda kv: (kv[1], -per_page[kv[0]], kv[0]))
     return RunSummary(
         run_id=run_id,
         pages_audited=len(scores),

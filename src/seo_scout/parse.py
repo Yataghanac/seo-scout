@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from selectolax.parser import HTMLParser, Node
 
-from seo_scout.urls import normalize, resolve
+from seo_scout.urls import link_pair, normalize
 
 _WS = re.compile(r"\s+")
 _NON_CONTENT_TAGS = ["script", "style", "noscript", "template", "svg"]
+
+
+class Link(BaseModel):
+    """One outgoing anchor: `key` is the target page's identity, `url` the spelling to fetch."""
+
+    model_config = ConfigDict(frozen=True)
+
+    key: str
+    url: str
 
 
 class ParsedPage(BaseModel):
@@ -28,7 +37,7 @@ class ParsedPage(BaseModel):
     word_count: int = 0
     images_total: int = 0
     images_missing_alt: int = 0
-    links: list[str] = []
+    links: list[Link] = []
 
 
 def _clean(value: str | None) -> str | None:
@@ -54,14 +63,14 @@ def _meta_map(tree: HTMLParser) -> dict[str, str]:
     return found
 
 
-def _links(tree: HTMLParser, base_url: str) -> list[str]:
-    """Outgoing links as written (resolved, fragment dropped), one per distinct page."""
+def _links(tree: HTMLParser, base_url: str) -> list[Link]:
+    """One link per distinct target page, keeping the first spelling seen for it."""
     seen: dict[str, str] = {}
     for node in tree.css("a[href]"):
         href = node.attributes.get("href")
-        if href and (key := normalize(href, base_url)) and (url := resolve(href, base_url)):
-            seen.setdefault(key, url)
-    return list(seen.values())
+        if href and (pair := link_pair(href, base_url)):
+            seen.setdefault(*pair)
+    return [Link(key=key, url=url) for key, url in seen.items()]
 
 
 def _canonical(tree: HTMLParser, base_url: str) -> str | None:

@@ -7,13 +7,13 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import perf_counter
-from urllib.parse import urldefrag, urljoin
+from urllib.parse import urljoin
 
 import httpx
 from pydantic import BaseModel
 
 from seo_scout.models import RedirectHop
-from seo_scout.urls import looks_binary, same_site
+from seo_scout.urls import looks_binary, resolve, same_site
 
 log = logging.getLogger("seo_scout.crawler.fetch")
 
@@ -92,6 +92,7 @@ class Fetcher:
         started = perf_counter()
         chain: list[RedirectHop] = []
         current = url
+        visited = {resolve(url) or url}  # wire forms of every URL requested so far
         attempt = _Attempt(status=0, content_type=None, headers={})
         for _ in range(MAX_REDIRECTS):
             attempt = await self._fetch_once(current)
@@ -99,15 +100,17 @@ class Fetcher:
             if attempt.status not in _REDIRECTS or not location:
                 return self._result(url, current, attempt, chain, started)
             chain.append(RedirectHop(url=current, status=attempt.status))
-            # Request exactly what the server named (normalize() would collapse /a/ back
-            # to /a and loop). Fragments never go on the wire, so a Location that only
-            # differs by one is a self-redirect: stop after this hop, not after ten.
-            target = urldefrag(urljoin(current, location)).url
-            if target == current:
-                break
-            if not same_site(url, target):
+            # Request the path the server named (normalize() would collapse /a/ back to
+            # /a and loop), but compare on the wire form: host case, a default port or a
+            # fragment never change the request, so such a Location, or any URL already
+            # in this chain (A->B->A), is a loop and stops here rather than after ten hops.
+            target = resolve(urljoin(current, location))
+            if target is None or not same_site(url, target):
                 attempt.skipped = "off_site_redirect"
-                return self._result(url, target, attempt, chain, started)
+                return self._result(url, target or location, attempt, chain, started)
+            if target in visited:
+                break
+            visited.add(target)
             current = target
         attempt.skipped = "too_many_redirects"
         return self._result(url, current, attempt, chain, started)

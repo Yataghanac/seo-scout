@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import tldextract
 
@@ -22,25 +22,27 @@ _BINARY_EXTENSIONS = frozenset(
 )  # fmt: skip
 
 
-def resolve(raw: str, base: str | None = None) -> str | None:
-    """The URL to *request*: resolved against `base`, fragment dropped, spelling kept.
+def _netloc(parts: SplitResult, scheme: str) -> str | None:
+    """Host (bracketed when IPv6) plus a non-default port. Credentials never survive:
 
-    `normalize()` answers "is this the same page?"; this answers "what do I fetch?".
-    Requesting the normalised form manufactures redirects on sites that canonicalise
-    with a trailing slash, so the two must stay separate. None if not http(s).
+    httpx would send them as Basic auth and the URL would be stored with them.
     """
-    if normalize(raw, base) is None:
+    host, port = parts.hostname, parts.port  # both raise ValueError on garbage
+    if not host:
         return None
-    joined = urljoin(base, raw.strip()) if base else raw.strip()
-    parts = urlsplit(joined)
-    return urlunsplit((parts.scheme.lower(), parts.netloc, parts.path or "/", parts.query, ""))
+    if ":" in host:
+        host = f"[{host}]"
+    return host if port in (None, _DEFAULT_PORTS[scheme]) else f"{host}:{port}"
 
 
-def normalize(raw: str, base: str | None = None) -> str | None:
-    """Canonical form for frontier dedupe, or None if the link must never be followed.
+def link_pair(raw: str, base: str | None = None) -> tuple[str, str] | None:
+    """(identity key, request spelling) from one parse, or None if never to be followed.
 
-    Lowercases scheme and host, drops default ports and fragments, sorts query
-    parameters, resolves relative paths against `base`, and collapses trailing slashes.
+    The key answers "is this the same page?" (scheme and host lowercased, default port
+    and fragment dropped, query sorted, trailing slashes collapsed). The request answers
+    "what do I fetch?": the same netloc, but path and query exactly as written. Requesting
+    the key manufactures redirects on sites that canonicalise with a trailing slash, so
+    the two must stay separate; computing both from one split keeps link parsing cheap.
     """
     raw = raw.strip()
     if not raw or raw.lower().startswith(_SKIP_PREFIXES):
@@ -48,19 +50,30 @@ def normalize(raw: str, base: str | None = None) -> str | None:
     joined = urljoin(base, raw) if base else raw
     try:
         parts = urlsplit(joined)
-        host = parts.hostname
-        port = parts.port
+        scheme = parts.scheme.lower()
+        netloc = _netloc(parts, scheme) if scheme in _DEFAULT_PORTS else None
     except ValueError:
         return None
-    scheme = parts.scheme.lower()
-    if scheme not in _DEFAULT_PORTS or not host:
+    if netloc is None:
         return None
-    netloc = host if port in (None, _DEFAULT_PORTS[scheme]) else f"{host}:{port}"
+    request = urlunsplit((scheme, netloc, parts.path or "/", parts.query, ""))
     path = parts.path or "/"
     if path != "/":
         path = path.rstrip("/") or "/"
     query = urlencode(sorted(parse_qsl(parts.query, keep_blank_values=True)))
-    return urlunsplit((scheme, netloc, path, query, ""))
+    return urlunsplit((scheme, netloc, path, query, "")), request
+
+
+def normalize(raw: str, base: str | None = None) -> str | None:
+    """A page's identity: the key half of `link_pair()`."""
+    pair = link_pair(raw, base)
+    return pair[0] if pair else None
+
+
+def resolve(raw: str, base: str | None = None) -> str | None:
+    """The URL to request: the spelling half of `link_pair()`."""
+    pair = link_pair(raw, base)
+    return pair[1] if pair else None
 
 
 def registrable_domain(url: str) -> str:

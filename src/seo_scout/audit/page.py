@@ -66,4 +66,5 @@ class AuditPage(BaseModel):
 
     @cached_property
     def internal_links(self) -> list[str]:
-        return [link for link in self.parsed.links if same_site(self.url, link)]
+        """Identity keys of same-site link targets: what `status_by_url` is keyed by."""
+        return [link.key for link in self.parsed.links if same_site(self.url, link.key)]

@@ -140,6 +140,7 @@ class FakeTimer:
         ("::1", "http://[::1]:8000"),
         ("localhost", "http://localhost:8000"),
         ("2001:db8::5", "http://[2001:db8::5]:8000"),
+        ("[::1]", "http://[::1]:8000"),
     ],
 )
 def test_browser_url_is_a_connect_address(host: str, expected: str) -> None:
@@ -188,6 +189,18 @@ def test_crawl_prints_the_next_step(tmp_path: Path) -> None:
     result = runner.invoke(app, args)
     assert result.exit_code == 0, result.output
     assert f"next: seo-scout serve --open --db {tmp_path / 't.db'}" in result.output
+
+
+@respx.mock
+def test_next_step_quotes_a_db_path_with_spaces(tmp_path: Path) -> None:
+    respx.get("https://e.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html="<p>x</p>"))
+    db_file = tmp_path / "my sites" / "t.db"
+    db_file.parent.mkdir()
+    result = runner.invoke(app, ["crawl", "https://e.com/", "--no-ai", "--db", str(db_file)])
+    assert result.exit_code == 0, result.output
+    assert f'next: seo-scout serve --open --db "{db_file}"' in result.output
 
 
 @respx.mock

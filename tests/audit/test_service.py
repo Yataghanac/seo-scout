@@ -89,3 +89,21 @@ def test_empty_run_summarises_without_dividing_by_zero(conn: sqlite3.Connection)
     assert summary.pages_audited == 0
     assert summary.average_score == 0
     assert summary.worst_pages == []
+
+
+def test_worst_pages_never_lists_a_clean_page(conn: sqlite3.Connection) -> None:
+    """Export, report and Slack all read worst_pages; a clean page is not a place to start."""
+    run_id = repo_runs.create_run(conn, "https://e.com/", {})
+    words = " ".join(f"w{i}" for i in range(320))
+    clean = GOOD.replace('<a href="/dead">dead</a>', "").format(
+        url="https://e.com/clean", words=words
+    )
+    repo_pages.insert_page(conn, run_id, fetched("https://e.com/clean", clean))
+    repo_pages.insert_page(
+        conn, run_id, fetched("https://e.com/bad", "<html><body>x</body></html>")
+    )
+    repo_runs.finish_run(conn, run_id, "complete", pages=2)
+    summary = audit_run(conn, run_id)
+    assert summary.pages_audited == 2
+    assert [w.url for w in summary.worst_pages] == ["https://e.com/bad"]
+    assert all(w.issues > 0 for w in summary.worst_pages)

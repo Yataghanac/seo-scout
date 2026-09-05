@@ -117,3 +117,57 @@ async def test_prefix_candidate_is_tried_even_when_robots_names_a_sitemap(
     )
     assert not root.called
     assert {"https://example.com/a", "https://example.com/docs/guide"} <= seeds.from_sitemap
+
+
+@respx.mock
+async def test_prefix_guess_walks_up_to_parent_paths(client: httpx.AsyncClient) -> None:
+    """Starting at /uv/guides/ must still find /uv/sitemap.xml."""
+    respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://example.com/uv/guides/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://example.com/uv/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=DOCS)
+    )
+    seeds = await discover_seeds(client, "https://example.com/uv/guides/", [])
+    assert "https://example.com/docs/guide" in seeds.from_sitemap
+
+
+@respx.mock
+async def test_prefix_guess_skips_a_trailing_file_segment(client: httpx.AsyncClient) -> None:
+    """/docs/index.html lives in /docs/, so the guess is /docs/sitemap.xml, not under the file."""
+    respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    under_file = respx.get("https://example.com/docs/index.html/sitemap.xml").mock(
+        return_value=httpx.Response(404)
+    )
+    respx.get("https://example.com/docs/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=DOCS)
+    )
+    seeds = await discover_seeds(client, "https://example.com/docs/index.html", [])
+    assert not under_file.called
+    assert "https://example.com/docs/guide" in seeds.from_sitemap
+
+
+@respx.mock
+async def test_prefix_walk_stops_at_the_first_hit(client: httpx.AsyncClient) -> None:
+    respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://example.com/a/b/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=DOCS)
+    )
+    parent = respx.get("https://example.com/a/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=URLSET)
+    )
+    seeds = await discover_seeds(client, "https://example.com/a/b/", [])
+    assert not parent.called
+    assert "https://example.com/docs/guide" in seeds.from_sitemap
+
+
+@respx.mock
+async def test_prefix_walk_is_bounded(client: httpx.AsyncClient) -> None:
+    respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    for prefix in ("/a/b/c/d/e", "/a/b/c/d", "/a/b/c"):
+        respx.get(f"https://example.com{prefix}/sitemap.xml").mock(return_value=httpx.Response(404))
+    deep = respx.get("https://example.com/a/b/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=DOCS)
+    )
+    seeds = await discover_seeds(client, "https://example.com/a/b/c/d/e/", [])
+    assert not deep.called
+    assert seeds.urls == ["https://example.com/a/b/c/d/e/"]

@@ -1,3 +1,6 @@
+import pytest
+
+from seo_scout import urls
 from seo_scout.parse import parse_html
 
 HTML = """<html lang="en"><head>
@@ -39,7 +42,26 @@ def test_body_fields() -> None:
 
 def test_links_are_resolved_deduped_and_filtered() -> None:
     p = parse_html(HTML, "https://example.com/dir/")
-    assert p.links == ["https://example.com/a", "https://other.com/"]
+    assert [link.url for link in p.links] == ["https://example.com/a", "https://other.com/"]
+
+
+def test_links_carry_identity_key_and_request_spelling() -> None:
+    """The key is what the audit and frontier match on; the url is what gets fetched."""
+    html = '<a href="/a/">1</a><a href="/a">2</a><a href="/b?y=2&x=1">3</a>'
+    p = parse_html(html, "https://example.com/")
+    assert [(link.key, link.url) for link in p.links] == [
+        ("https://example.com/a", "https://example.com/a/"),
+        ("https://example.com/b?x=1&y=2", "https://example.com/b?y=2&x=1"),
+    ]
+
+
+def test_each_anchor_is_parsed_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """150k links took ~6.5 s when every anchor was split three or four times."""
+    real, calls = urls.urlsplit, []
+    monkeypatch.setattr(urls, "urlsplit", lambda value: (calls.append(value), real(value))[1])
+    anchors = "".join(f'<a href="/p{i}">x</a>' for i in range(20))
+    parse_html(f"<html><body>{anchors}</body></html>", "https://example.com/")
+    assert len(calls) <= 20
 
 
 def test_malformed_html_does_not_raise() -> None:
@@ -47,7 +69,7 @@ def test_malformed_html_does_not_raise() -> None:
         "<html><title>Broken</title><body><p>x <a href='/y'>y</div></p><b>", "https://e.com/"
     )
     assert p.title == "Broken"
-    assert p.links == ["https://e.com/y"]
+    assert [link.url for link in p.links] == ["https://e.com/y"]
 
 
 def test_empty_document() -> None:

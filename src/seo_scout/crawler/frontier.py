@@ -11,12 +11,16 @@ class Frontier:
         self._queue: deque[tuple[str, int, str]] = deque()
         self.seen: set[str] = set()
 
-    def add(self, url: str, depth: int, request: str | None = None) -> bool:
-        """Queue a page once by its normalized `url`; `request` is the spelling to fetch."""
+    def add(self, url: str, depth: int, request: str) -> bool:
+        """Queue a page once by its normalized `url`; `request` is the spelling to fetch.
+
+        `request` has no default on purpose: falling back to the key would silently
+        re-enable requesting the normalised form, which manufactures redirects.
+        """
         if depth > self._max_depth or url in self.seen:
             return False
         self.seen.add(url)
-        self._queue.append((url, depth, request or url))
+        self._queue.append((url, depth, request))
         return True
 
     def mark_seen(self, url: str) -> None:

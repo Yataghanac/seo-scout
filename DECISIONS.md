@@ -297,3 +297,42 @@ narrow-screen rule was moved after the base rule it overrides. `init` had a hand
 fallback template that had already drifted from `.env.example`; the template is now shipped
 inside the package and a test asserts the two files are identical. Repaired suggestions store
 the bare violation list rather than a prose sentence, and rejected ones keep both attempts.
+
+## Post-launch — Second review pass: keys and spellings all the way down
+
+**Trigger.** A second review of the identity-versus-request commit found that the split had
+been carried through the fetcher and the frontier but not through the parser's consumers.
+`ParsedPage.links` held request spellings, so the `broken_links` rule looked up
+`https://site/dead/` in a status table keyed by `https://site/dead` and reported nothing;
+the crawler checked robots.txt against the key, so `Disallow: /private/` (which permits
+`/private`) let `/private/` through; and every anchor was parsed three or four times because
+the key was computed, discarded and recomputed (about 6.5 s per 150k links).
+
+**Decision.** The parser is the one place a link's two forms are derived, and it returns
+both: `ParsedPage.links` is a list of `Link(key, url)`. `urls.link_pair()` produces the pair
+from a single split; `normalize()` and `resolve()` are now its two halves, so they cannot
+drift. Consumers pick the half that matches what they compare against: the audit's
+`internal_links` and the crawler's frontier use `key`, the fetcher and the robots check use
+`url`. `Frontier.add()` requires the request spelling rather than defaulting to the key, so a
+future caller cannot quietly reintroduce the normalised request.
+
+**Netloc is rebuilt, never copied.** `resolve()` used to keep `parts.netloc` verbatim, so a
+link written as `https://user:pw@host/` would have been requested with Basic auth and stored
+with the credential. Both forms now rebuild the netloc from hostname and port (bracketing
+IPv6, which `normalize()` had also been mangling), so credentials never reach the wire or the
+database.
+
+**Redirect loops compare wire forms.** The loop check was string equality against the
+current URL, so `Location: HTTPS://HOST/a`, `:443`, or an A->B->A cycle each burned ten
+rate-limited requests. `fetch()` now keeps the wire form (`resolve()`) of every URL requested
+in the chain and stops at the first repeat. `/a` and `/a/` remain distinct, as they must.
+
+**Also from the same review.** Sitemap discovery walks the start path's directories
+deepest-first (three at most, a trailing file segment skipped) and stops at the first that
+answers, so `/uv/guides/` finds `/uv/sitemap.xml` and `/docs/index.html` does not look under
+the file. `summarize_run` excludes issue-free pages from `worst_pages`, so the export, the
+report and Slack agree with the dashboard that it is a to-do list; the dashboard's fallback
+for a page outside its loaded list now shows the issue count instead of "No issues". A
+rejected suggestion's reason kept the repair violations twice; the first attempt's are now
+snapshotted once. The next-step hint quotes a database path containing whitespace, and
+`_browser_url` no longer double-brackets an already-bracketed IPv6 host.

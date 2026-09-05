@@ -189,7 +189,8 @@ async def _attempt(ctx: _Ctx, facts: PageFacts) -> _Outcome:
             return _Outcome("repaired" if prior else "ok", suggestion, reason=why, calls=calls)
         previous: Suggestion | str = suggestion or completion.content or completion.refusal or ""
         messages = build_messages(facts, previous=previous, violations=violations)
-        prior = violations
+        if kind == "initial":
+            prior = violations  # the repair's own violations must not overwrite these
     reason = (
         f"repair attempt:\n{summarize_violations(violations)}\n"
         f"first attempt:\n{summarize_violations(prior)}"

@@ -187,8 +187,13 @@ def env_template() -> str:
 
 
 def _next_step(db_path: str | None) -> None:
-    hint = "next: seo-scout serve --open" + (f" --db {db_path}" if db_path else "")
+    hint = "next: seo-scout serve --open" + (f" --db {_quoted(db_path)}" if db_path else "")
     typer.echo(hint, err=True)
+
+
+def _quoted(path: str) -> str:
+    """Double quotes are understood by every shell the hint may be pasted into."""
+    return f'"{path}"' if any(c.isspace() for c in path) else path
 
 
 def _browser_url(host: str, port: int) -> str:
@@ -197,7 +202,7 @@ def _browser_url(host: str, port: int) -> str:
         host = "127.0.0.1"
     elif host == "::":
         host = "::1"
-    if ":" in host:
+    if ":" in host and not host.startswith("["):
         host = f"[{host}]"
     return f"http://{host}:{port}"
 

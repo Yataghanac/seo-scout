@@ -199,9 +199,7 @@ class Crawler:
         if result.body is None:
             return
         parsed = parse_html(result.body, result.final_url)
-        internal = {
-            normalize(link) or link: link for link in parsed.links if same_site(state.home, link)
-        }
+        internal = {link.key: link.url for link in parsed.links if same_site(state.home, link.key)}
         repo_pages.insert_links(self._conn, state.run_id, url, list(internal))
         for key, link in internal.items():
             self._enqueue(state, key, depth + 1, link)
@@ -230,7 +228,8 @@ class Crawler:
 
     @staticmethod
     def _enqueue(state: _State, url: str, depth: int, request: str) -> None:
-        if same_site(state.home, url) and state.policy.allowed(url):
+        """robots.txt is matched against what goes on the wire: `Disallow: /x/` spares /x."""
+        if same_site(state.home, url) and state.policy.allowed(request):
             state.frontier.add(url, depth, request)
         elif url not in state.frontier.seen:
             log.debug("skipped by policy", extra={"url": url})

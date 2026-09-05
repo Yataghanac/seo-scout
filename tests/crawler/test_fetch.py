@@ -212,3 +212,43 @@ async def test_fragment_in_location_is_dropped(client: httpx.AsyncClient) -> Non
     r = await make(client, Sleeps()).fetch("https://e.com/a")
     assert r.status == 200
     assert r.final_url == "https://e.com/b"
+
+
+@respx.mock
+async def test_two_hop_redirect_cycle_stops_after_one_lap(client: httpx.AsyncClient) -> None:
+    a = respx.get("https://e.com/a").mock(
+        return_value=httpx.Response(301, headers={"location": "/b"})
+    )
+    b = respx.get("https://e.com/b").mock(
+        return_value=httpx.Response(301, headers={"location": "/a"})
+    )
+    r = await make(client, Sleeps()).fetch("https://e.com/a")
+    assert r.skipped == "too_many_redirects"
+    assert (a.call_count, b.call_count) == (1, 1)
+    assert [h.url for h in r.redirect_chain] == ["https://e.com/a", "https://e.com/b"]
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "location", ["HTTPS://E.COM/a", "https://e.com:443/a", "https://e.com/a#x"]
+)
+async def test_location_differing_only_on_the_wire_is_a_self_redirect(
+    client: httpx.AsyncClient, location: str
+) -> None:
+    """Case, a default port or a fragment never change what is requested: one hop, not ten."""
+    route = respx.get("https://e.com/a").mock(
+        return_value=httpx.Response(301, headers={"location": location})
+    )
+    r = await make(client, Sleeps()).fetch("https://e.com/a")
+    assert route.call_count == 1
+    assert r.skipped == "too_many_redirects"
+
+
+@respx.mock
+async def test_path_spelling_is_still_a_real_hop(client: httpx.AsyncClient) -> None:
+    """/a and /a/ are different requests, so the loop check must not collapse them."""
+    respx.get("https://e.com/a").mock(return_value=httpx.Response(301, headers={"location": "/a/"}))
+    respx.get("https://e.com/a/").mock(return_value=httpx.Response(200, html="<p>a</p>"))
+    r = await make(client, Sleeps()).fetch("https://e.com/a")
+    assert r.status == 200
+    assert r.final_url == "https://e.com/a/"

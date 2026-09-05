@@ -174,6 +174,20 @@ async def test_second_failure_rejects_and_keeps_nothing_unvalidated(
     assert (report_2.cached, report_2.rejected, report_2.calls) == (1, 1, 0)
 
 
+async def test_rejection_reason_keeps_each_attempts_own_violations(
+    conn: sqlite3.Connection,
+) -> None:
+    run_id = seed(conn, {"https://e.com/a": html()})
+    too_long = "Fresh Roasted Coffee Beans Delivered Weekly To Your Door With Free Tasting Notes"
+    fake = FakeCompleter([completion("Best Coffee", GOOD_META), completion(too_long, GOOD_META)])
+    await run(conn, run_id, fake)
+    (row,) = repo_ai.list_suggestions(conn, run_id)
+    assert row.status == "rejected" and row.reason is not None
+    repair, first = row.reason.split("first attempt:")
+    assert "title_too_long" in repair and "title_too_short" not in repair
+    assert "title_too_short" in first and "title_too_long" not in first
+
+
 async def test_invalid_json_and_refusals_are_treated_as_violations(
     conn: sqlite3.Connection,
 ) -> None:

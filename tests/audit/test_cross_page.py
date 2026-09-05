@@ -59,6 +59,16 @@ def test_broken_internal_links_report_targets() -> None:
     assert "https://e.com/dead" in issue.message
 
 
+def test_broken_link_written_with_a_trailing_slash_is_still_reported() -> None:
+    """Statuses are keyed by page identity; a link's spelling must not hide a 404."""
+    home = page("https://e.com/", links=("/dead/", "/ok/"))
+    statuses = {"https://e.com/dead": 404, "https://e.com/ok": 200}
+    ctx = build_context([home], inbound={}, sitemap_urls=set(), status_by_url=statuses)
+    (issue,) = [i for i in audit_page(home, ctx) if i.rule_id == "broken_links"]
+    assert "1 broken" in issue.message
+    assert "https://e.com/dead" in issue.message
+
+
 def test_orphan_pages_are_in_sitemap_with_no_inbound_links() -> None:
     home = page("https://e.com/", links=("/linked",))
     linked = page("https://e.com/linked")

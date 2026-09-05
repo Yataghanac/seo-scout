@@ -193,13 +193,14 @@ function renderHelp() {
 
 function headline(p) {
   const i = p.issues.find((x) => x.severity === "critical") || p.issues.find((x) => x.severity === "warning") || p.issues[0];
-  return i ? i.message : "No issues on this page.";
+  return i ? i.message : (p.summary || "No issues on this page.");
 }
 
 function renderStart() {
   // Same ranking as summary.worst_pages in the export and report (score, then issue count, then URL).
   const byUrl = new Map(state.pages.map((p) => [p.url, p]));
-  const worst = state.summary.summary.worst_pages.filter((w) => w.issues > 0).slice(0, 5).map((w) => byUrl.get(w.url) || { url: w.url, score: w.score, issues: [] });
+  // worst_pages already excludes clean pages; a page outside the loaded list still gets its count.
+  const worst = state.summary.summary.worst_pages.slice(0, 5).map((w) => byUrl.get(w.url) || { url: w.url, score: w.score, issues: [], summary: `${w.issues} issue${w.issues === 1 ? "" : "s"} (open the page for details)` });
   $("#start-list").innerHTML = worst.map((p) => `<li data-url="${esc(p.url)}"><span class="sc">${p.score}</span><span class="u" title="${esc(p.url)}">${esc(p.url)}</span><span class="m">${esc(headline(p))}</span></li>`).join("") || '<li class="empty">Nothing to fix: no page in this run has an issue.</li>';
   for (const li of $("#start-list").querySelectorAll("li[data-url]")) li.onclick = () => showDetail(li.dataset.url);
 }
