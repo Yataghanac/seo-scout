@@ -7,7 +7,7 @@ import re
 from pydantic import BaseModel
 from selectolax.parser import HTMLParser, Node
 
-from seo_scout.urls import normalize
+from seo_scout.urls import normalize, resolve
 
 _WS = re.compile(r"\s+")
 _NON_CONTENT_TAGS = ["script", "style", "noscript", "template", "svg"]
@@ -55,12 +55,13 @@ def _meta_map(tree: HTMLParser) -> dict[str, str]:
 
 
 def _links(tree: HTMLParser, base_url: str) -> list[str]:
-    seen: dict[str, None] = {}
+    """Outgoing links as written (resolved, fragment dropped), one per distinct page."""
+    seen: dict[str, str] = {}
     for node in tree.css("a[href]"):
         href = node.attributes.get("href")
-        if href and (url := normalize(href, base_url)):
-            seen.setdefault(url, None)
-    return list(seen)
+        if href and (key := normalize(href, base_url)) and (url := resolve(href, base_url)):
+            seen.setdefault(key, url)
+    return list(seen.values())
 
 
 def _canonical(tree: HTMLParser, base_url: str) -> str | None:

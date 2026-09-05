@@ -35,6 +35,11 @@ truststore (OS certificate store for corporate TLS). No LangChain/Scrapy/Celery/
   only audit module that touches the database.
 - Every function < 50 lines (ruff `max-statements=40`), every module < 400 lines (tested).
 - Config: one `Settings` object in `config.py`; secrets only via env / `.env`.
+  `.env.example` and `src/seo_scout/env.example` must stay identical (a test enforces it);
+  `seo-scout init` writes the packaged copy.
+- URLs: `urls.normalize()` is a page's identity (dedupe, storage, audit keys);
+  `urls.resolve()` is what gets fetched. Never request the normalized form: sites that
+  canonicalise with a trailing slash would answer with a redirect the crawler caused.
 - Logging: JSON lines to stderr with `run_id`; `--verbose` for per-URL debug.
 
 ## AI layer invariants

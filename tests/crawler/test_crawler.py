@@ -302,3 +302,35 @@ async def test_trailing_slash_redirect_target_is_not_fetched_twice(
     assert pages["https://e.com/x"].final_url == "https://e.com/x/"
     assert pages["https://e.com/x"].status == 200
     assert slashed.call_count == 1
+
+
+@respx.mock
+async def test_link_written_with_a_slash_is_requested_with_the_slash(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    """The crawler must not manufacture a redirect by requesting the normalised spelling."""
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/y/")))
+    slashed = respx.get("https://e.com/y/").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/")
+    pages = {p.url: p for p in repo_pages.list_pages(conn, report.run_id)}
+    assert set(pages) == {"https://e.com/", "https://e.com/y"}
+    assert slashed.call_count == 1
+    assert pages["https://e.com/y"].status == 200
+    assert pages["https://e.com/y"].final_url == "https://e.com/y/"
+    assert pages["https://e.com/y"].redirect_chain == []
+
+
+@respx.mock
+async def test_start_url_is_requested_as_given(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    respx.get("https://e.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/docs/sitemap.xml").mock(return_value=httpx.Response(404))
+    home = respx.get("https://e.com/docs/").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/docs/")
+    pages = {p.url: p for p in repo_pages.list_pages(conn, report.run_id)}
+    assert home.call_count == 1
+    assert pages["https://e.com/docs"].final_url == "https://e.com/docs/"
+    assert pages["https://e.com/docs"].redirect_chain == []

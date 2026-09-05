@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from defusedxml import ElementTree
 from pydantic import BaseModel
 
-from seo_scout.urls import normalize, same_site
+from seo_scout.urls import normalize, resolve, same_site
 
 log = logging.getLogger("seo_scout.crawler.sitemap")
 
@@ -54,13 +54,19 @@ async def _get_text(client: httpx.AsyncClient, url: str, user_agent: str | None)
     return response.text if response.status_code == 200 else None
 
 
-def _default_sitemaps(home: str) -> list[str]:
-    """Host root first; for a site under a path prefix (docs.example.com/uv/) also that path."""
-    candidates = [urljoin(home, "/sitemap.xml")]
-    path = urlsplit(home).path
-    if path not in ("", "/") and "." not in path.rsplit("/", 1)[-1]:
-        candidates.append(urljoin(home + "/", "sitemap.xml"))
-    return candidates
+def _sitemap_guesses(home: str) -> tuple[str, str | None]:
+    """(host-root sitemap, sitemap under the start path or None when the start is the root).
+
+    Docs generators write the sitemap at the site's base path, and one host often serves
+    several such sites, so the prefix guess is worth one request whenever the start URL
+    names a prefix. Query strings and dotted segments (`/3.12/`) are not part of the path.
+    """
+    parts = urlsplit(home)
+    root = urlunsplit((parts.scheme, parts.netloc, "/sitemap.xml", "", ""))
+    prefix = parts.path.strip("/")
+    if not prefix:
+        return root, None
+    return root, urlunsplit((parts.scheme, parts.netloc, f"/{prefix}/sitemap.xml", "", ""))
 
 
 async def discover_seeds(
@@ -70,11 +76,18 @@ async def discover_seeds(
     *,
     user_agent: str | None = None,
 ) -> Seeds:
-    """Homepage first, then every same-site URL found in sitemaps (index files followed)."""
+    """Homepage first, then every same-site URL found in sitemaps (index files followed).
+
+    URLs are kept as the sitemap spelled them (that is what gets requested);
+    `from_sitemap` holds their normalized keys for the audit.
+    """
     home = normalize(site_url) or site_url
-    queue = deque(robots_sitemaps or _default_sitemaps(home))
+    root_guess, prefix_guess = _sitemap_guesses(home)
+    queue = deque(robots_sitemaps or [root_guess])
+    if prefix_guess:
+        queue.append(prefix_guess)
     visited: set[str] = set()
-    found: dict[str, None] = {}
+    found: dict[str, str] = {}
     while queue and len(visited) < MAX_SITEMAP_FILES:
         sitemap_url = queue.popleft()
         if sitemap_url in visited:
@@ -86,10 +99,11 @@ async def discover_seeds(
         children, pages = parse_sitemap(text)
         queue.extend(c for c in children if same_site(home, c))
         for raw in pages:
-            url = normalize(raw)
-            if url and same_site(home, url):
-                found.setdefault(url, None)
+            key, url = normalize(raw), resolve(raw)
+            if key and url and same_site(home, key):
+                found.setdefault(key, url)
     from_sitemap = set(found)
-    urls = [home, *(u for u in found if u != home)]
+    start = resolve(site_url) or site_url
+    urls = [start, *(u for k, u in found.items() if k != home)]
     log.info("seeds discovered", extra={"sitemap_files": len(visited), "seeds": len(urls)})
     return Seeds(urls=urls, from_sitemap=from_sitemap)

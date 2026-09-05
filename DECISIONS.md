@@ -264,3 +264,36 @@ pins `--python 3.12` because on a machine whose default Python is older uv other
 with a resolution error, which is the first thing a non-developer would hit. `[project.urls]`
 was added so the package page, when it is published, links back to the repo and to this file.
 No PyPI publish yet: a GitHub install needs no account and no release process.
+
+## Post-launch — Review pass: identity versus request URL, and nine smaller fixes
+
+**Trigger.** A code review of the post-launch commits found that the redirect fix had been
+applied one layer too shallow. `fetch()` requested redirect targets verbatim, but the crawler
+still requested the *start URL and every link* in `normalize()`'s slash-stripped form. On any
+site that canonicalises with a trailing slash that meant two requests per page and a
+crawler-manufactured redirect hop on every one: run 4 of `peps.python.org` showed 17 of 20
+pages with a 301 the server never asked for, and a site-wide http->https redirect would have
+tripped the `redirect_chain` rule on every page.
+
+**Decision.** Two URL forms, two jobs, kept apart everywhere: `urls.normalize()` is the
+page's identity (frontier dedupe, `pages.url`, `links`, `sitemap_urls`, audit keys);
+`urls.resolve()` is what gets fetched (resolved against the base, fragment dropped, spelling
+kept). The parser returns links as written, the frontier carries `(key, depth, request)`,
+sitemap seeds keep the sitemap's spelling with normalized keys alongside, and the start URL is
+fetched as the user typed it. Re-crawling the PEP site and the uv docs after the change: zero
+redirect hops, identical page sets and sitemap counts.
+
+**Also fixed from the same review.** A fragment-only `Location` (`#top`) looped ten
+rate-limited requests; it now stops after one. The path-prefix sitemap guess collapsed to the
+host root when the start URL carried a query string, skipped versioned prefixes like `/3.12/`,
+and was never tried when robots.txt named a sitemap; it is now built from URL parts and
+always tried alongside. `serve --open` opened a browser tab even when the port was taken, and
+built the URL from the bind address (`0.0.0.0`, `::`); the timer is now cancelled when uvicorn
+exits and the URL is a connectable loopback form. The next-step hint dropped `--db` and landed
+in cron mail from `report`; it now carries the database path and `report` prints it only on a
+terminal. *Start here* listed clean pages and ranked ties differently from the export's
+`worst_pages`; it now renders from the server's ranking and only pages with issues, and its
+narrow-screen rule was moved after the base rule it overrides. `init` had a hand-copied
+fallback template that had already drifted from `.env.example`; the template is now shipped
+inside the package and a test asserts the two files are identical. Repaired suggestions store
+the bare violation list rather than a prose sentence, and rejected ones keep both attempts.

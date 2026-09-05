@@ -188,3 +188,27 @@ async def test_redirect_to_trailing_slash_variant_is_followed(client: httpx.Asyn
     assert r.skipped is None
     assert r.final_url == "https://e.com/a/"
     assert [(h.url, h.status) for h in r.redirect_chain] == [("https://e.com/a", 301)]
+
+
+@respx.mock
+async def test_fragment_only_location_is_a_loop_after_one_request(
+    client: httpx.AsyncClient,
+) -> None:
+    route = respx.get("https://e.com/a").mock(
+        return_value=httpx.Response(301, headers={"location": "#top"})
+    )
+    r = await make(client, Sleeps()).fetch("https://e.com/a")
+    assert route.call_count == 1
+    assert r.skipped == "too_many_redirects"
+    assert r.final_url == "https://e.com/a"
+
+
+@respx.mock
+async def test_fragment_in_location_is_dropped(client: httpx.AsyncClient) -> None:
+    respx.get("https://e.com/a").mock(
+        return_value=httpx.Response(301, headers={"location": "/b#x"})
+    )
+    respx.get("https://e.com/b").mock(return_value=httpx.Response(200, html="<p>b</p>"))
+    r = await make(client, Sleeps()).fetch("https://e.com/a")
+    assert r.status == 200
+    assert r.final_url == "https://e.com/b"

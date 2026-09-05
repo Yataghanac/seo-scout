@@ -22,6 +22,20 @@ _BINARY_EXTENSIONS = frozenset(
 )  # fmt: skip
 
 
+def resolve(raw: str, base: str | None = None) -> str | None:
+    """The URL to *request*: resolved against `base`, fragment dropped, spelling kept.
+
+    `normalize()` answers "is this the same page?"; this answers "what do I fetch?".
+    Requesting the normalised form manufactures redirects on sites that canonicalise
+    with a trailing slash, so the two must stay separate. None if not http(s).
+    """
+    if normalize(raw, base) is None:
+        return None
+    joined = urljoin(base, raw.strip()) if base else raw.strip()
+    parts = urlsplit(joined)
+    return urlunsplit((parts.scheme.lower(), parts.netloc, parts.path or "/", parts.query, ""))
+
+
 def normalize(raw: str, base: str | None = None) -> str | None:
     """Canonical form for frontier dedupe, or None if the link must never be followed.
 

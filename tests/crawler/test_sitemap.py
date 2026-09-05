@@ -12,7 +12,7 @@ URLSET = """<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/
 async def test_reads_urlset_and_always_includes_homepage(client: httpx.AsyncClient) -> None:
     respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(200, text=URLSET))
     seeds = await discover_seeds(client, "https://example.com/", [])
-    assert seeds.urls == ["https://example.com/", "https://example.com/a", "https://example.com/b"]
+    assert seeds.urls == ["https://example.com/", "https://example.com/a", "https://example.com/b/"]
     assert seeds.from_sitemap == {"https://example.com/a", "https://example.com/b"}
 
 
@@ -70,5 +70,50 @@ async def test_site_under_a_path_prefix_tries_its_own_sitemap(client: httpx.Asyn
     )
     seeds = await discover_seeds(client, "https://example.com/docs/", [])
     assert root.called
-    assert seeds.urls == ["https://example.com/docs", "https://example.com/docs/guide"]
+    assert seeds.urls == ["https://example.com/docs/", "https://example.com/docs/guide/"]
     assert seeds.from_sitemap == {"https://example.com/docs/guide"}
+
+
+DOCS = """<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://example.com/docs/guide/</loc></url></urlset>"""
+
+
+@respx.mock
+async def test_query_string_on_the_start_url_does_not_collapse_the_prefix(
+    client: httpx.AsyncClient,
+) -> None:
+    respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    docs = respx.get("https://example.com/docs/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=DOCS)
+    )
+    seeds = await discover_seeds(client, "https://example.com/docs?lang=en", [])
+    assert docs.called
+    assert "https://example.com/docs/guide" in seeds.from_sitemap
+
+
+@respx.mock
+async def test_dotted_directory_prefix_is_still_tried(client: httpx.AsyncClient) -> None:
+    versioned = """<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://example.com/3.12/lib/</loc></url></urlset>"""
+    respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://example.com/3.12/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=versioned)
+    )
+    seeds = await discover_seeds(client, "https://example.com/3.12/", [])
+    assert "https://example.com/3.12/lib" in seeds.from_sitemap
+
+
+@respx.mock
+async def test_prefix_candidate_is_tried_even_when_robots_names_a_sitemap(
+    client: httpx.AsyncClient,
+) -> None:
+    root = respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://example.com/main.xml").mock(return_value=httpx.Response(200, text=URLSET))
+    respx.get("https://example.com/docs/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=DOCS)
+    )
+    seeds = await discover_seeds(
+        client, "https://example.com/docs/", ["https://example.com/main.xml"]
+    )
+    assert not root.called
+    assert {"https://example.com/a", "https://example.com/docs/guide"} <= seeds.from_sitemap

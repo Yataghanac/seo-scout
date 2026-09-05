@@ -92,12 +92,21 @@ def test_crawl_no_ai_flag_skips_the_stage() -> None:
     assert "ai:" not in result.stdout
 
 
-def test_init_creates_env_from_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / ".env.example").write_text("OPENAI_API_KEY=\nSEO_SCOUT_DB=seo_scout.db\n")
+REPO_ENV_EXAMPLE = Path(__file__).resolve().parents[1] / ".env.example"
+
+
+def test_packaged_env_template_matches_the_repo_example() -> None:
+    """One template, shipped in the wheel; the repo copy exists for humans browsing GitHub."""
+    assert cli.env_template() == REPO_ENV_EXAMPLE.read_text(encoding="utf-8")
+
+
+def test_init_writes_the_packaged_template_from_any_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)  # no .env.example here, as after `uv tool install`
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 0, result.output
-    assert (tmp_path / ".env").read_text() == "OPENAI_API_KEY=\nSEO_SCOUT_DB=seo_scout.db\n"
+    assert (tmp_path / ".env").read_text(encoding="utf-8") == cli.env_template()
     assert "OPENAI_API_KEY" in result.output
     assert "crawl" in result.output
 
@@ -114,18 +123,47 @@ def test_init_never_overwrites_an_existing_env(
     assert "already exists" in result.output
 
 
-def test_init_without_template_writes_a_minimal_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+class FakeTimer:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("127.0.0.1", "http://127.0.0.1:8000"),
+        ("0.0.0.0", "http://127.0.0.1:8000"),
+        ("::", "http://[::1]:8000"),
+        ("::1", "http://[::1]:8000"),
+        ("localhost", "http://localhost:8000"),
+        ("2001:db8::5", "http://[2001:db8::5]:8000"),
+    ],
+)
+def test_browser_url_is_a_connect_address(host: str, expected: str) -> None:
+    assert cli._browser_url(host, 8000) == expected
+
+
+def test_serve_open_cancels_the_browser_when_the_server_fails(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, ["init"])
-    assert result.exit_code == 0, result.output
-    assert "OPENAI_API_KEY=" in (tmp_path / ".env").read_text()
+    timer = FakeTimer()
+    monkeypatch.setattr(cli, "_open_later", lambda url: timer)
+
+    def fail(*a: object, **k: object) -> None:
+        raise SystemExit(1)
+
+    monkeypatch.setattr(cli.uvicorn, "run", fail)
+    result = runner.invoke(app, ["serve", "--open", "--db", ":memory:"])
+    assert result.exit_code == 1
+    assert timer.cancelled
 
 
 def test_serve_open_launches_the_browser(monkeypatch: pytest.MonkeyPatch) -> None:
     opened: list[str] = []
-    monkeypatch.setattr(cli, "_open_later", opened.append)
+    monkeypatch.setattr(cli, "_open_later", lambda url: (opened.append(url), FakeTimer())[1])
     monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: None)
     result = runner.invoke(app, ["serve", "--open", "--port", "8765", "--db", ":memory:"])
     assert result.exit_code == 0, result.output
@@ -149,4 +187,16 @@ def test_crawl_prints_the_next_step(tmp_path: Path) -> None:
     args = ["crawl", "https://e.com/", "--no-ai", "--db", str(tmp_path / "t.db")]
     result = runner.invoke(app, args)
     assert result.exit_code == 0, result.output
-    assert "next: seo-scout serve --open" in result.output
+    assert f"next: seo-scout serve --open --db {tmp_path / 't.db'}" in result.output
+
+
+@respx.mock
+def test_report_keeps_its_output_clean_for_schedulers(tmp_path: Path) -> None:
+    respx.get("https://e.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html="<p>x</p>"))
+    db, out = str(tmp_path / "t.db"), str(tmp_path)
+    args = ["report", "https://e.com/", "--no-ai", "--db", db, "--out", out]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert "next:" not in result.output  # stderr is not a terminal here, as under cron

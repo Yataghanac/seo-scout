@@ -95,8 +95,8 @@ class Crawler:
 
     async def plan(self, start_url: str) -> list[str]:
         """Dry run: the seed URLs a crawl would start from. Fetches only robots and sitemaps."""
-        home = self._home(start_url)
-        policy, seeds = await self._discover(home)
+        self._home(start_url)  # rejects non-http(s) input before any request
+        policy, seeds = await self._discover(start_url)
         return [u for u in seeds.urls if policy.allowed(u)]
 
     async def run(
@@ -118,7 +118,7 @@ class Crawler:
         bind_run_id(run_id)
         log.info("crawl started", extra={"start_url": home, **limits})
         started = time.monotonic()
-        policy, seeds = await self._discover(home)
+        policy, seeds = await self._discover(start_url)  # verbatim: the seed is fetched as given
         if policy.disallow_all:
             why = "robots.txt unreachable or 5xx; refusing to crawl (see crawling policy)"
             repo_runs.finish_run(self._conn, run_id, "failed", pages=0, error=why)
@@ -134,8 +134,8 @@ class Crawler:
             policy=policy,
             limiter=RateLimiter(delay, self._sleep),
         )
-        for url in seeds.urls:
-            self._enqueue(state, url, 0)
+        for seed in seeds.urls:
+            self._enqueue(state, normalize(seed) or seed, 0, seed)
         status, error = await self._run_guarded(state, budget)
         repo_runs.finish_run(self._conn, run_id, status, pages=state.fetched, error=error)
         elapsed = time.monotonic() - started
@@ -184,25 +184,27 @@ class Crawler:
                 task.cancel()
             await asyncio.gather(*state.pending, return_exceptions=True)
 
-    async def _process(self, state: _State, url: str, depth: int) -> None:
+    async def _process(self, state: _State, url: str, depth: int, request: str) -> None:
         await state.limiter.wait()
         try:
-            result = await self._fetcher.fetch(url)
+            result = await self._fetcher.fetch(request)
         except NetworkError as exc:
             self._record_failure(state, url, depth, str(exc))
             return
         state.consecutive_failures = 0
         state.frontier.mark_seen(normalize(result.final_url) or result.final_url)
-        repo_pages.insert_page(self._conn, state.run_id, _to_page(result, depth))
+        repo_pages.insert_page(self._conn, state.run_id, _to_page(result, depth, url))
         state.fetched += 1
         log.debug("fetched", extra={"url": url, "status": result.status, "skipped": result.skipped})
         if result.body is None:
             return
         parsed = parse_html(result.body, result.final_url)
-        internal = [link for link in parsed.links if same_site(state.home, link)]
-        repo_pages.insert_links(self._conn, state.run_id, url, internal)
-        for link in internal:
-            self._enqueue(state, link, depth + 1)
+        internal = {
+            normalize(link) or link: link for link in parsed.links if same_site(state.home, link)
+        }
+        repo_pages.insert_links(self._conn, state.run_id, url, list(internal))
+        for key, link in internal.items():
+            self._enqueue(state, key, depth + 1, link)
 
     def _record_failure(self, state: _State, url: str, depth: int, error: str) -> None:
         log.warning("fetch failed", extra={"url": url, "error": error})
@@ -227,9 +229,9 @@ class Crawler:
             )
 
     @staticmethod
-    def _enqueue(state: _State, url: str, depth: int) -> None:
+    def _enqueue(state: _State, url: str, depth: int, request: str) -> None:
         if same_site(state.home, url) and state.policy.allowed(url):
-            state.frontier.add(url, depth)
+            state.frontier.add(url, depth, request)
         elif url not in state.frontier.seen:
             log.debug("skipped by policy", extra={"url": url})
 
@@ -247,9 +249,10 @@ class Crawler:
         return home
 
 
-def _to_page(result: FetchResult, depth: int) -> FetchedPage:
+def _to_page(result: FetchResult, depth: int, url: str) -> FetchedPage:
+    """`url` is the page's identity key; `result.url` was the spelling requested."""
     return FetchedPage(
-        url=result.url,
+        url=url,
         final_url=result.final_url,
         status=result.status,
         depth=depth,
