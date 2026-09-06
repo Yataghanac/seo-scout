@@ -1,5 +1,6 @@
 import pytest
 
+from seo_scout import urls
 from seo_scout.urls import link_pair, looks_binary, normalize, resolve, same_site
 
 
@@ -91,3 +92,18 @@ def test_link_pair_returns_identity_key_and_request_spelling() -> None:
     )
     assert link_pair("mailto:a@b.c", "https://example.com/") is None
     assert link_pair("/a", None) is None
+
+
+@pytest.mark.parametrize("raw", ["https://[::1/x", "//[::1/x", "https://e.com:abc/x"])
+def test_link_pair_rejects_a_malformed_host_instead_of_raising(raw: str) -> None:
+    """One hostile anchor must never take a crawl down."""
+    assert link_pair(raw, "https://e.com/") is None
+
+
+def test_registrable_domain_is_computed_once_per_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """same_site runs per link; the suffix-list lookup must not."""
+    real, hosts = urls._extract, []
+    monkeypatch.setattr(urls, "_extract", lambda host: (hosts.append(host), real(host))[1])
+    for i in range(5):
+        assert same_site("https://once-a.com/", f"https://sub{i % 2}.once-a.com/p{i}")
+    assert len(hosts) == len(set(hosts))

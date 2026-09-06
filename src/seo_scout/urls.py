@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+from typing import NamedTuple
 from urllib.parse import SplitResult, parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import tldextract
@@ -22,6 +24,17 @@ _BINARY_EXTENSIONS = frozenset(
 )  # fmt: skip
 
 
+class Link(NamedTuple):
+    """One URL in its two forms: `key` is the page's identity, `url` the spelling to fetch.
+
+    Every consumer (parser, frontier, sitemap seeds, audit) passes this one shape around
+    rather than each inventing its own pair.
+    """
+
+    key: str
+    url: str
+
+
 def _netloc(parts: SplitResult, scheme: str) -> str | None:
     """Host (bracketed when IPv6) plus a non-default port. Credentials never survive:
 
@@ -35,7 +48,7 @@ def _netloc(parts: SplitResult, scheme: str) -> str | None:
     return host if port in (None, _DEFAULT_PORTS[scheme]) else f"{host}:{port}"
 
 
-def link_pair(raw: str, base: str | None = None) -> tuple[str, str] | None:
+def link_pair(raw: str, base: str | None = None) -> Link | None:
     """(identity key, request spelling) from one parse, or None if never to be followed.
 
     The key answers "is this the same page?" (scheme and host lowercased, default port
@@ -43,46 +56,52 @@ def link_pair(raw: str, base: str | None = None) -> tuple[str, str] | None:
     "what do I fetch?": the same netloc, but path and query exactly as written. Requesting
     the key manufactures redirects on sites that canonicalise with a trailing slash, so
     the two must stay separate; computing both from one split keeps link parsing cheap.
+
+    Anything the parser rejects (`https://[::1/x`, a non-numeric port) is one bad anchor
+    on one page, never an exception: a hostile link must not take the crawl down.
     """
     raw = raw.strip()
     if not raw or raw.lower().startswith(_SKIP_PREFIXES):
         return None
-    joined = urljoin(base, raw) if base else raw
     try:
-        parts = urlsplit(joined)
+        parts = urlsplit(urljoin(base, raw) if base else raw)  # urljoin also parses
         scheme = parts.scheme.lower()
         netloc = _netloc(parts, scheme) if scheme in _DEFAULT_PORTS else None
     except ValueError:
         return None
     if netloc is None:
         return None
-    request = urlunsplit((scheme, netloc, parts.path or "/", parts.query, ""))
     path = parts.path or "/"
-    if path != "/":
-        path = path.rstrip("/") or "/"
-    query = urlencode(sorted(parse_qsl(parts.query, keep_blank_values=True)))
-    return urlunsplit((scheme, netloc, path, query, "")), request
+    request = urlunsplit((scheme, netloc, path, parts.query, ""))
+    key_path = path.rstrip("/") or "/"
+    query = urlencode(sorted(parse_qsl(parts.query, keep_blank_values=True))) if parts.query else ""
+    return Link(urlunsplit((scheme, netloc, key_path, query, "")), request)
 
 
 def normalize(raw: str, base: str | None = None) -> str | None:
     """A page's identity: the key half of `link_pair()`."""
     pair = link_pair(raw, base)
-    return pair[0] if pair else None
+    return pair.key if pair else None
 
 
 def resolve(raw: str, base: str | None = None) -> str | None:
     """The URL to request: the spelling half of `link_pair()`."""
     pair = link_pair(raw, base)
-    return pair[1] if pair else None
+    return pair.url if pair else None
 
 
-def registrable_domain(url: str) -> str:
-    """`blog.example.co.uk` -> `example.co.uk`; falls back to the hostname (localhost)."""
-    host = urlsplit(url).hostname or ""
+@lru_cache(maxsize=4096)
+def _domain_of(host: str) -> str:
+    """The public-suffix lookup costs ~13 us; a crawl asks it about a handful of hosts."""
     ext = _extract(host)
     if ext.domain and ext.suffix:
         return f"{ext.domain}.{ext.suffix}".lower()
     return host.lower()
+
+
+def registrable_domain(url: str) -> str:
+    """`blog.example.co.uk` -> `example.co.uk`; falls back to the hostname (localhost)."""
+    return _domain_of(urlsplit(url).hostname or "")
 
 
 def same_site(a: str, b: str) -> bool:

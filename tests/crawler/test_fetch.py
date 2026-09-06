@@ -58,7 +58,7 @@ async def test_redirect_loop_gives_up_cleanly(client: httpx.AsyncClient) -> None
     respx.get("https://e.com/a").mock(return_value=httpx.Response(301, headers={"location": "/b"}))
     respx.get("https://e.com/b").mock(return_value=httpx.Response(301, headers={"location": "/a"}))
     r = await make(client, Sleeps()).fetch("https://e.com/a")
-    assert r.skipped == "too_many_redirects"
+    assert r.skipped == "redirect_loop"
     assert r.body is None
     assert r.status == 301
 
@@ -199,7 +199,7 @@ async def test_fragment_only_location_is_a_loop_after_one_request(
     )
     r = await make(client, Sleeps()).fetch("https://e.com/a")
     assert route.call_count == 1
-    assert r.skipped == "too_many_redirects"
+    assert r.skipped == "redirect_loop"
     assert r.final_url == "https://e.com/a"
 
 
@@ -223,7 +223,7 @@ async def test_two_hop_redirect_cycle_stops_after_one_lap(client: httpx.AsyncCli
         return_value=httpx.Response(301, headers={"location": "/a"})
     )
     r = await make(client, Sleeps()).fetch("https://e.com/a")
-    assert r.skipped == "too_many_redirects"
+    assert r.skipped == "redirect_loop"
     assert (a.call_count, b.call_count) == (1, 1)
     assert [h.url for h in r.redirect_chain] == ["https://e.com/a", "https://e.com/b"]
 
@@ -241,7 +241,7 @@ async def test_location_differing_only_on_the_wire_is_a_self_redirect(
     )
     r = await make(client, Sleeps()).fetch("https://e.com/a")
     assert route.call_count == 1
-    assert r.skipped == "too_many_redirects"
+    assert r.skipped == "redirect_loop"
 
 
 @respx.mock
@@ -252,3 +252,47 @@ async def test_path_spelling_is_still_a_real_hop(client: httpx.AsyncClient) -> N
     r = await make(client, Sleeps()).fetch("https://e.com/a")
     assert r.status == 200
     assert r.final_url == "https://e.com/a/"
+
+
+@respx.mock
+async def test_a_long_chain_of_distinct_hops_is_too_many_redirects(
+    client: httpx.AsyncClient,
+) -> None:
+    for i in range(12):
+        respx.get(f"https://e.com/h{i}").mock(
+            return_value=httpx.Response(301, headers={"location": f"/h{i + 1}"})
+        )
+    r = await make(client, Sleeps()).fetch("https://e.com/h0")
+    assert r.skipped == "too_many_redirects"
+    assert len(r.redirect_chain) == 10
+
+
+@respx.mock
+@pytest.mark.parametrize("location", ["javascript:void(0)", "mailto:x@y.z", "ftp://e.com/x"])
+async def test_unfollowable_location_is_a_bad_redirect_not_a_crash(
+    client: httpx.AsyncClient, location: str
+) -> None:
+    """httpx builds the next request even with follow_redirects=False and can raise on it."""
+    route = respx.get("https://e.com/a").mock(
+        return_value=httpx.Response(301, headers={"location": location})
+    )
+    r = await make(client, Sleeps()).fetch("https://e.com/a")
+    assert route.call_count == 1
+    assert r.skipped == "bad_redirect"
+    assert r.body is None
+    assert r.final_url == "https://e.com/a"
+
+
+@respx.mock
+async def test_redirect_into_a_disallowed_path_is_not_requested(client: httpx.AsyncClient) -> None:
+    respx.get("https://e.com/go").mock(
+        return_value=httpx.Response(301, headers={"location": "/private/"})
+    )
+    private = respx.get("https://e.com/private/").mock(return_value=httpx.Response(200, html="s"))
+    fetcher = make(client, Sleeps())
+    r = await fetcher.fetch("https://e.com/go", allowed=lambda u: "/private/" not in u)
+    assert not private.called
+    assert r.skipped == "disallowed_redirect"
+    assert r.status == 301
+    assert r.final_url == "https://e.com/private/"
+    assert [h.url for h in r.redirect_chain] == ["https://e.com/go"]

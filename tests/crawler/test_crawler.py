@@ -369,3 +369,72 @@ async def test_dry_run_and_crawl_agree_on_a_disallowed_seed(
     report = await crawler.run("https://e.com/private/")
     assert not seed.called
     assert report.pages == 0
+
+
+@respx.mock
+async def test_redirect_into_a_disallowed_path_is_not_followed(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    """robots.txt applies to every request a page causes, not only the first."""
+    respx.get("https://e.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nDisallow: /private/\n")
+    )
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/go")))
+    respx.get("https://e.com/go").mock(
+        return_value=httpx.Response(301, headers={"location": "/private/"})
+    )
+    private = respx.get("https://e.com/private/").mock(
+        return_value=httpx.Response(200, html=html("/private/secret"))
+    )
+    report = await make(conn, client).run("https://e.com/")
+    assert not private.called
+    assert report.status == "complete"
+    pages = {p.url: p for p in repo_pages.list_pages(conn, report.run_id)}
+    assert set(pages) == {"https://e.com/", "https://e.com/go"}
+    assert pages["https://e.com/go"].status == 301
+    assert pages["https://e.com/go"].error == "disallowed_redirect"
+
+
+@respx.mock
+async def test_failed_fetch_stores_the_spelling_that_was_requested(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/a/")))
+    respx.get("https://e.com/a/").mock(side_effect=httpx.ConnectError("down"))
+    report = await make(conn, client).run("https://e.com/")
+    pages = {p.url: p for p in repo_pages.list_pages(conn, report.run_id)}
+    assert pages["https://e.com/a"].status == 0
+    assert pages["https://e.com/a"].final_url == "https://e.com/a/"
+
+
+@respx.mock
+async def test_unfollowable_location_does_not_abort_the_run(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/j", "/k")))
+    respx.get("https://e.com/j").mock(
+        return_value=httpx.Response(301, headers={"location": "javascript:void(0)"})
+    )
+    respx.get("https://e.com/k").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/")
+    assert report.status == "complete"
+    pages = {p.url: p for p in repo_pages.list_pages(conn, report.run_id)}
+    assert set(pages) == {"https://e.com/", "https://e.com/j", "https://e.com/k"}
+    assert pages["https://e.com/j"].error == "bad_redirect"
+
+
+@respx.mock
+async def test_malformed_anchor_does_not_abort_the_run(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(
+        return_value=httpx.Response(200, html=html("https://[::1/x", "/ok"))
+    )
+    respx.get("https://e.com/ok").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/")
+    assert report.status == "complete"
+    assert set(urls(conn, report.run_id)) == {"https://e.com/", "https://e.com/ok"}

@@ -188,7 +188,8 @@ def test_crawl_prints_the_next_step(tmp_path: Path) -> None:
     args = ["crawl", "https://e.com/", "--no-ai", "--db", str(tmp_path / "t.db")]
     result = runner.invoke(app, args)
     assert result.exit_code == 0, result.output
-    assert f"next: seo-scout serve --open --db {tmp_path / 't.db'}" in result.output
+    hint = f"next: seo-scout serve --open --db {cli._quoted(str(tmp_path / 't.db'))}"
+    assert hint in result.output  # tmp_path may contain whitespace on some machines
 
 
 @respx.mock
@@ -213,3 +214,18 @@ def test_report_keeps_its_output_clean_for_schedulers(tmp_path: Path) -> None:
     result = runner.invoke(app, args)
     assert result.exit_code == 0, result.output
     assert "next:" not in result.output  # stderr is not a terminal here, as under cron
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("plain.db", "plain.db"),
+        (r"C:\sites\t.db", r"C:\sites\t.db"),
+        ("/home/me/.seo/t.db", "/home/me/.seo/t.db"),
+        ("C:/my sites/t.db", '"C:/my sites/t.db"'),
+        ("C:/R&D/t.db", '"C:/R&D/t.db"'),
+        ("/srv/docs (1)/t.db", '"/srv/docs (1)/t.db"'),
+    ],
+)
+def test_quoted_wraps_anything_a_shell_would_split(path: str, expected: str) -> None:
+    assert cli._quoted(path) == expected

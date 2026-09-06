@@ -77,8 +77,9 @@ what makes them table-testable. Every design decision has a plain-English entry 
 The crawler is a good citizen, and none of this can be switched off:
 
 - **robots.txt is fetched first** (parsed with `protego`, the parser Scrapy uses, because
-  `urllib.robotparser` mishandles wildcards). `Crawl-delay` is honoured. A missing file allows
-  everything; an unreachable file or a 5xx disallows everything and the run is marked failed.
+  `urllib.robotparser` mishandles wildcards). `Crawl-delay` is honoured, and the rules apply
+  to every redirect hop, not only the first request. A missing file allows everything; an
+  unreachable file or a 5xx disallows everything and the run is marked failed.
 - **Honest identification**: `User-Agent: SEOScout/0.1 (+https://github.com/Yataghanac/seo-scout)`.
 - **Rate limited per host**: at most 2 concurrent requests and a minimum 0.5 s between
   request starts (configurable upward, never below zero; the robots crawl-delay wins if larger).

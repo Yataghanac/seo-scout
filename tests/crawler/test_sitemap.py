@@ -132,18 +132,33 @@ async def test_prefix_guess_walks_up_to_parent_paths(client: httpx.AsyncClient) 
 
 
 @respx.mock
-async def test_prefix_guess_skips_a_trailing_file_segment(client: httpx.AsyncClient) -> None:
-    """/docs/index.html lives in /docs/, so the guess is /docs/sitemap.xml, not under the file."""
+async def test_a_trailing_file_segment_costs_one_miss_then_tries_its_directory(
+    client: httpx.AsyncClient,
+) -> None:
+    """No file-versus-directory guessing: /3.12 and /index.html look alike; the bound pays."""
     respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(404))
-    under_file = respx.get("https://example.com/docs/index.html/sitemap.xml").mock(
+    respx.get("https://example.com/docs/index.html/sitemap.xml").mock(
         return_value=httpx.Response(404)
     )
     respx.get("https://example.com/docs/sitemap.xml").mock(
         return_value=httpx.Response(200, text=DOCS)
     )
     seeds = await discover_seeds(client, "https://example.com/docs/index.html", [])
-    assert not under_file.called
     assert "https://example.com/docs/guide" in seeds.from_sitemap
+
+
+@respx.mock
+async def test_dotted_directory_without_a_trailing_slash_is_still_tried(
+    client: httpx.AsyncClient,
+) -> None:
+    versioned = """<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://example.com/3.12/lib/</loc></url></urlset>"""
+    respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://example.com/3.12/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=versioned)
+    )
+    seeds = await discover_seeds(client, "https://example.com/3.12", [])
+    assert "https://example.com/3.12/lib" in seeds.from_sitemap
 
 
 @respx.mock
@@ -171,3 +186,66 @@ async def test_prefix_walk_is_bounded(client: httpx.AsyncClient) -> None:
     seeds = await discover_seeds(client, "https://example.com/a/b/c/d/e/", [])
     assert not deep.called
     assert seeds.urls == ["https://example.com/a/b/c/d/e/"]
+
+
+@respx.mock
+async def test_prefix_sitemap_is_read_before_a_large_robots_index(
+    client: httpx.AsyncClient,
+) -> None:
+    """The file cap must never starve the sitemap of the site the user asked for."""
+    children = "".join(
+        f"<sitemap><loc>https://example.com/child{i}.xml</loc></sitemap>" for i in range(60)
+    )
+    index = f'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{children}</sitemapindex>'
+    respx.get("https://example.com/index.xml").mock(return_value=httpx.Response(200, text=index))
+    respx.route(url__regex=r"https://example\.com/child\d+\.xml").mock(
+        return_value=httpx.Response(200, text=URLSET)
+    )
+    docs = respx.get("https://example.com/docs/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=DOCS)
+    )
+    seeds = await discover_seeds(
+        client, "https://example.com/docs/", ["https://example.com/index.xml"]
+    )
+    assert docs.called
+    assert seeds.urls[:2] == ["https://example.com/docs/", "https://example.com/docs/guide/"]
+
+
+@respx.mock
+async def test_walk_stops_at_a_guess_that_robots_already_named(client: httpx.AsyncClient) -> None:
+    respx.get("https://example.com/uv/guides/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=DOCS)
+    )
+    parent = respx.get("https://example.com/uv/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=URLSET)
+    )
+    seeds = await discover_seeds(
+        client, "https://example.com/uv/guides/", ["https://example.com/uv/guides/sitemap.xml"]
+    )
+    assert not parent.called
+    assert seeds.from_sitemap == {"https://example.com/docs/guide"}
+
+
+@respx.mock
+async def test_soft_404_does_not_stop_the_walk(client: httpx.AsyncClient) -> None:
+    """A host that answers 200 with an HTML shell for every path has not served a sitemap."""
+    respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://example.com/uv/guides/sitemap.xml").mock(
+        return_value=httpx.Response(200, html="<html><body>Not found</body></html>")
+    )
+    respx.get("https://example.com/uv/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=DOCS)
+    )
+    seeds = await discover_seeds(client, "https://example.com/uv/guides/", [])
+    assert "https://example.com/docs/guide" in seeds.from_sitemap
+
+
+@respx.mock
+async def test_seeds_keep_identity_key_and_spelling_together(client: httpx.AsyncClient) -> None:
+    respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(200, text=URLSET))
+    seeds = await discover_seeds(client, "https://Example.com", [])
+    assert seeds.pairs == [
+        ("https://example.com/", "https://example.com/"),
+        ("https://example.com/a", "https://example.com/a"),
+        ("https://example.com/b", "https://example.com/b/"),
+    ]

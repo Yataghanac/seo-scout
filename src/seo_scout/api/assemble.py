@@ -1,7 +1,8 @@
 """Join pages, scores, issues and AI rows into PageView objects; filter and sort them.
 
-A run is capped at 500 pages, so filtering and sorting happen in Python on one query's
-worth of rows rather than in SQL. That keeps the repository layer free of API concerns.
+A run holds at most `Settings.max_pages` rows (5,000 at the ceiling), so filtering and
+sorting happen in Python on one query's worth of rows rather than in SQL. That keeps the
+repository layer free of API concerns.
 """
 
 from __future__ import annotations

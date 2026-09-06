@@ -18,6 +18,7 @@ from seo_scout.urls import looks_binary, resolve, same_site
 log = logging.getLogger("seo_scout.crawler.fetch")
 
 SleepFn = Callable[[float], Awaitable[None]]
+Allowed = Callable[[str], bool]
 
 _HTML_TYPES = {"text/html", "application/xhtml+xml"}
 _REDIRECTS = {301, 302, 303, 307, 308}
@@ -40,7 +41,10 @@ class FetchResult(BaseModel):
     elapsed_ms: int
     redirect_chain: list[RedirectHop] = []
     headers: dict[str, str] = {}
-    skipped: str | None = None  # non_html | too_large | too_many_redirects | off_site_redirect
+    # non_html | too_large | too_many_redirects (10 distinct hops) | redirect_loop (a hop
+    # already in this chain) | off_site_redirect | bad_redirect (Location is not an http(s)
+    # URL) | disallowed_redirect (the `allowed` gate refused a hop)
+    skipped: str | None = None
 
 
 @dataclass
@@ -87,8 +91,12 @@ class Fetcher:
         self._timeout = timeout
         self._sleep = sleep
 
-    async def fetch(self, url: str) -> FetchResult:
-        """Fetch one URL, following same-site redirects and recording every hop."""
+    async def fetch(self, url: str, *, allowed: Allowed | None = None) -> FetchResult:
+        """Fetch one URL, following same-site redirects and recording every hop.
+
+        `allowed` (robots.txt in the crawler) is asked before every hop, not only the
+        first request: a permitted `/go` that redirects into `/private/` must not fetch it.
+        """
         started = perf_counter()
         chain: list[RedirectHop] = []
         current = url
@@ -100,16 +108,25 @@ class Fetcher:
             if attempt.status not in _REDIRECTS or not location:
                 return self._result(url, current, attempt, chain, started)
             chain.append(RedirectHop(url=current, status=attempt.status))
+            # urljoin first, then resolve: a fragment-only Location (`#top`) resolved on
+            # its own is nothing, joined to the current URL it is the same page (a loop).
             # Request the path the server named (normalize() would collapse /a/ back to
             # /a and loop), but compare on the wire form: host case, a default port or a
             # fragment never change the request, so such a Location, or any URL already
             # in this chain (A->B->A), is a loop and stops here rather than after ten hops.
             target = resolve(urljoin(current, location))
-            if target is None or not same_site(url, target):
+            if target is None:
+                attempt.skipped = "bad_redirect"
+                return self._result(url, current, attempt, chain, started)
+            if not same_site(url, target):
                 attempt.skipped = "off_site_redirect"
-                return self._result(url, target or location, attempt, chain, started)
+                return self._result(url, target, attempt, chain, started)
             if target in visited:
-                break
+                attempt.skipped = "redirect_loop"
+                return self._result(url, current, attempt, chain, started)
+            if allowed is not None and not allowed(target):
+                attempt.skipped = "disallowed_redirect"
+                return self._result(url, target, attempt, chain, started)
             visited.add(target)
             current = target
         attempt.skipped = "too_many_redirects"
@@ -147,6 +164,17 @@ class Fetcher:
 
     async def _request(self, method: str, url: str) -> _Attempt:
         """One streamed request. Bodies are only read for 2xx HTML within the size cap."""
+        try:
+            return await self._stream(method, url)
+        except httpx.InvalidURL:
+            # httpx builds the redirect target even with follow_redirects=False, and a
+            # `Location: javascript:void(0)` (mailto:, data:, tel:) makes it raise after
+            # the response was received and before we could see it. The status is gone
+            # with the response; what is known is that it was a redirect nobody can follow.
+            log.debug("unfollowable Location header", extra={"url": url})
+            return _Attempt(status=0, content_type=None, headers={}, skipped="bad_redirect")
+
+    async def _stream(self, method: str, url: str) -> _Attempt:
         async with self._client.stream(
             method, url, headers=self._headers, timeout=self._timeout, follow_redirects=False
         ) as response:

@@ -134,8 +134,8 @@ class Crawler:
             policy=policy,
             limiter=RateLimiter(delay, self._sleep),
         )
-        for seed in seeds.urls:
-            self._enqueue(state, normalize(seed) or seed, 0, seed)
+        for seed in seeds.pairs:  # every seed is same-site already; robots decides the rest
+            self._enqueue(state, seed.key, 0, seed.url)
         status, error = await self._run_guarded(state, budget)
         repo_runs.finish_run(self._conn, run_id, status, pages=state.fetched, error=error)
         elapsed = time.monotonic() - started
@@ -187,9 +187,9 @@ class Crawler:
     async def _process(self, state: _State, url: str, depth: int, request: str) -> None:
         await state.limiter.wait()
         try:
-            result = await self._fetcher.fetch(request)
+            result = await self._fetcher.fetch(request, allowed=state.policy.allowed)
         except NetworkError as exc:
-            self._record_failure(state, url, depth, str(exc))
+            self._record_failure(state, url, depth, request, str(exc))
             return
         state.consecutive_failures = 0
         state.frontier.mark_seen(normalize(result.final_url) or result.final_url)
@@ -204,11 +204,14 @@ class Crawler:
         for key, link in internal.items():
             self._enqueue(state, key, depth + 1, link)
 
-    def _record_failure(self, state: _State, url: str, depth: int, error: str) -> None:
+    def _record_failure(
+        self, state: _State, url: str, depth: int, request: str, error: str
+    ) -> None:
+        """`request` is the spelling that failed, stored as `final_url` like any other row."""
         log.warning("fetch failed", extra={"url": url, "error": error})
         page = FetchedPage(
             url=url,
-            final_url=url,
+            final_url=request,
             status=0,
             depth=depth,
             content_type=None,
@@ -228,8 +231,12 @@ class Crawler:
 
     @staticmethod
     def _enqueue(state: _State, url: str, depth: int, request: str) -> None:
-        """robots.txt is matched against what goes on the wire: `Disallow: /x/` spares /x."""
-        if same_site(state.home, url) and state.policy.allowed(request):
+        """robots.txt is matched against what goes on the wire: `Disallow: /x/` spares /x.
+
+        Callers pass same-site URLs only (seeds are filtered by discovery, links by
+        `_process`); the same `policy.allowed` also gates every redirect hop in `fetch()`.
+        """
+        if state.policy.allowed(request):
             state.frontier.add(url, depth, request)
         elif url not in state.frontier.seen:
             log.debug("skipped by policy", extra={"url": url})

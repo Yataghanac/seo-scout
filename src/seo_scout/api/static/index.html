@@ -96,14 +96,14 @@
   .copy { text-transform: none; letter-spacing: 0; margin-left: 8px; }
   .copy:hover { color: var(--accent); border-color: var(--accent); }
   .start ol { list-style: none; margin: 0; padding: 0; counter-reset: n; }
-  .start li { display: grid; grid-template-columns: 24px 48px minmax(0, 1.1fr) minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 7px 0; border-bottom: 1px dashed var(--line); cursor: pointer; counter-increment: n; }
+  .start li { display: grid; grid-template-columns: 24px 48px minmax(0, 1.1fr) minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 7px 0; border-bottom: 1px dashed var(--line); counter-increment: n; }
   .start li::before { content: counter(n); color: var(--faint); font-size: 12px; }
   .start li:last-child { border-bottom: 0; }
-  .start li:hover .u { color: var(--accent); }
+  .start li[data-url] { cursor: pointer; } .start li[data-url]:hover .u { color: var(--accent); }
   .start .sc { font: 700 18px var(--serif); font-variant-numeric: tabular-nums; }
   .start .u { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .start .m { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .start li.empty { display: block; counter-increment: none; cursor: default; }
+  .start li.empty { display: block; counter-increment: none; }
   @media (max-width: 1000px) { .start li { grid-template-columns: 24px 48px minmax(0, 1fr); } .start .m { grid-column: 2 / -1; } }
   .legend { display: inline-flex; gap: 8px; align-items: center; color: var(--faint); font-size: 12px; }
   .warn { border-left: 3px solid var(--warning); padding: 8px 12px; background: color-mix(in srgb, var(--warning) 10%, transparent); border-radius: 6px; }
@@ -199,9 +199,14 @@ function headline(p) {
 function renderStart() {
   // Same ranking as summary.worst_pages in the export and report (score, then issue count, then URL).
   const byUrl = new Map(state.pages.map((p) => [p.url, p]));
-  // worst_pages already excludes clean pages; a page outside the loaded list still gets its count.
-  const worst = state.summary.summary.worst_pages.slice(0, 5).map((w) => byUrl.get(w.url) || { url: w.url, score: w.score, issues: [], summary: `${w.issues} issue${w.issues === 1 ? "" : "s"} (open the page for details)` });
-  $("#start-list").innerHTML = worst.map((p) => `<li data-url="${esc(p.url)}"><span class="sc">${p.score}</span><span class="u" title="${esc(p.url)}">${esc(p.url)}</span><span class="m">${esc(headline(p))}</span></li>`).join("") || '<li class="empty">Nothing to fix: no page in this run has an issue.</li>';
+  // worst_pages already excludes clean pages. A page outside the loaded list has no detail
+  // to open (showDetail only knows loaded pages), so its row shows the count and is not a link.
+  const row = (w) => {
+    const p = byUrl.get(w.url);
+    const text = p ? headline(p) : `${w.issues} issue${w.issues === 1 ? "" : "s"} (not among the ${state.pages.length} pages loaded)`;
+    return `<li${p ? ` data-url="${esc(w.url)}"` : ""}><span class="sc">${w.score}</span><span class="u" title="${esc(w.url)}">${esc(w.url)}</span><span class="m">${esc(text)}</span></li>`;
+  };
+  $("#start-list").innerHTML = state.summary.summary.worst_pages.slice(0, 5).map(row).join("") || '<li class="empty">Nothing to fix: no page in this run has an issue.</li>';
   for (const li of $("#start-list").querySelectorAll("li[data-url]")) li.onclick = () => showDetail(li.dataset.url);
 }
 

@@ -336,3 +336,49 @@ for a page outside its loaded list now shows the issue count instead of "No issu
 rejected suggestion's reason kept the repair violations twice; the first attempt's are now
 snapshotted once. The next-step hint quotes a database path containing whitespace, and
 `_browser_url` no longer double-brackets an already-bracketed IPv6 host.
+
+## Post-launch — Third review pass: nothing a page serves may abort a crawl
+
+**Trigger.** A third review of the previous fix found two ways one hostile page could end a
+whole run: an anchor like `<a href="https://[::1/x">` raised `ValueError` out of the parser
+(the `urljoin` call sat outside the `try` that guarded `urlsplit`), and a `Location:
+javascript:void(0)` raised `httpx.InvalidURL`, which is not a `TransportError`, so the retry
+loop let it escape. Either left the run marked `running` forever and every later audit and AI
+pass of that run failed with it. The same review found robots.txt enforced only at enqueue,
+so `/go` -> 301 `/private/` fetched and stored a disallowed page, and four regressions in the
+sitemap prefix walk that the previous pass had introduced.
+
+**Decision.** The parser and the fetcher classify; they never raise for something a site
+sent. `link_pair()` parses inside one `try` and returns None for anything the standard
+library rejects, so a bad anchor is one dropped link. `_request()` catches `InvalidURL` and
+reports `bad_redirect`; httpx has already discarded the response by then, so the row keeps
+status 0 (the same value a failed request gets) with the reason alongside. The `skipped`
+vocabulary now distinguishes `redirect_loop` (a hop already in the chain), `too_many_redirects`
+(ten distinct hops), `bad_redirect` (a Location no crawler can follow, `ftp://` included) and
+`off_site_redirect`, so the dashboard's error column says which one happened.
+
+**One gate for every request.** `Fetcher.fetch()` takes an `allowed` callable and asks it
+before each redirect hop; the crawler passes `policy.allowed`, the same function that gates
+`plan()` and the frontier. A redirect into a disallowed path stops with
+`disallowed_redirect`, the disallowed URL recorded as `final_url` and never requested. The
+frontier no longer repeats the same-site check `_process` already made, and seeds arrive as
+`Link(key, url)` pairs so `run()` stops re-normalizing them.
+
+**Sitemap walk, corrected.** The prefix guesses run before the robots.txt sitemaps again:
+a large index could exhaust the 50-file cap before the start path's own sitemap was ever
+requested, and a guess robots.txt already named is now simply skipped as visited rather than
+letting the walk continue up to a sibling site. The file-versus-directory heuristic is gone:
+`/3.12` and `/index.html` look alike, so `/docs/index.html/sitemap.xml` costs one 404 and the
+bound pays for it. A 200 counts as a hit only when the body parsed as a `urlset` or
+`sitemapindex`; a soft-404 HTML shell no longer stops the walk empty-handed.
+
+**One shape for a link.** `urls.Link(key, url)` is a NamedTuple returned by `link_pair()`
+and carried unchanged by the parser, the sitemap seeds and the crawler, replacing a pydantic
+model, a bare tuple and two ad-hoc pairs. `registrable_domain()` caches the public-suffix
+lookup per host (`same_site` runs once per link; a crawl asks about a handful of hosts).
+
+**Also from the same review.** Failed fetches store the requested spelling as `final_url`
+like every other row. The next-step hint quotes any database path a shell would split on
+(`&`, `(`, whitespace), not only whitespace; `$` and `"` are left alone because bash and
+PowerShell escape them differently. The dashboard's *Start here* row for a page outside the
+loaded list shows the issue count and is not clickable, since there is no detail to open.

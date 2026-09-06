@@ -86,3 +86,8 @@ def test_missing_optional_fields_are_none() -> None:
     assert p.canonical is None
     assert p.lang is None
     assert p.og_title is None
+
+
+def test_malformed_ipv6_anchor_is_dropped_not_raised() -> None:
+    p = parse_html('<a href="https://[::1/x">x</a><a href="/ok">y</a>', "https://e.com/")
+    assert [link.url for link in p.links] == ["https://e.com/ok"]
