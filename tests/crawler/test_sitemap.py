@@ -69,7 +69,7 @@ async def test_site_under_a_path_prefix_tries_its_own_sitemap(client: httpx.Asyn
         return_value=httpx.Response(200, text=docs)
     )
     seeds = await discover_seeds(client, "https://example.com/docs/", [])
-    assert root.called
+    assert not root.called  # the host root would seed every sibling site on the host
     assert seeds.urls == ["https://example.com/docs/", "https://example.com/docs/guide/"]
     assert seeds.from_sitemap == {"https://example.com/docs/guide"}
 
@@ -249,3 +249,50 @@ async def test_seeds_keep_identity_key_and_spelling_together(client: httpx.Async
         ("https://example.com/a", "https://example.com/a"),
         ("https://example.com/b", "https://example.com/b/"),
     ]
+
+
+@respx.mock
+async def test_a_prefix_index_cannot_starve_the_robots_sitemaps(client: httpx.AsyncClient) -> None:
+    """Each source has its own file budget, so neither can use up the other's."""
+    children = "".join(
+        f"<sitemap><loc>https://example.com/docs/child{i}.xml</loc></sitemap>" for i in range(60)
+    )
+    index = f'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{children}</sitemapindex>'
+    respx.get("https://example.com/docs/sitemap.xml").mock(
+        return_value=httpx.Response(200, text=index)
+    )
+    respx.route(url__regex=r"https://example\.com/docs/child\d+\.xml").mock(
+        return_value=httpx.Response(200, text=DOCS)
+    )
+    main = respx.get("https://example.com/main.xml").mock(
+        return_value=httpx.Response(200, text=URLSET)
+    )
+    seeds = await discover_seeds(
+        client, "https://example.com/docs/", ["https://example.com/main.xml"]
+    )
+    assert main.called
+    assert "https://example.com/a" in seeds.from_sitemap
+
+
+@respx.mock
+async def test_malformed_index_children_are_skipped(client: httpx.AsyncClient) -> None:
+    index = """<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <sitemap><loc>https://[::1/x</loc></sitemap>
+    <sitemap><loc>https://example.com:abc/x.xml</loc></sitemap>
+    <sitemap><loc>https://example.com/child.xml</loc></sitemap></sitemapindex>"""
+    respx.get("https://example.com/sitemap.xml").mock(return_value=httpx.Response(200, text=index))
+    respx.get("https://example.com/child.xml").mock(return_value=httpx.Response(200, text=URLSET))
+    seeds = await discover_seeds(client, "https://example.com/", [])
+    assert "https://example.com/a" in seeds.from_sitemap
+
+
+@respx.mock
+async def test_a_robots_sitemap_line_httpx_cannot_request_is_skipped(
+    client: httpx.AsyncClient,
+) -> None:
+    seeds = await discover_seeds(
+        client,
+        "https://example.com/",
+        ["https://example.com:abc/sm.xml", "https://xn--a.com/s.xml"],
+    )
+    assert seeds.urls == ["https://example.com/"]

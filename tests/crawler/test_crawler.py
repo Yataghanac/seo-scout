@@ -3,9 +3,11 @@ import sqlite3
 from typing import Any
 
 import httpx
+import pytest
 import respx
 
 from seo_scout.config import Settings
+from seo_scout.crawler import crawler as crawler_module
 from seo_scout.crawler.crawler import Crawler
 from seo_scout.store import repo_pages, repo_runs
 
@@ -438,3 +440,76 @@ async def test_malformed_anchor_does_not_abort_the_run(
     report = await make(conn, client).run("https://e.com/")
     assert report.status == "complete"
     assert set(urls(conn, report.run_id)) == {"https://e.com/", "https://e.com/ok"}
+
+
+@respx.mock
+async def test_an_unexpected_error_still_finishes_the_run(
+    conn: sqlite3.Connection, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run row must never stay `running`: later passes and diffs would build on it."""
+    respx.get("https://e.com/robots.txt").mock(return_value=httpx.Response(404))
+
+    async def boom(*_: Any, **__: Any) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(crawler_module, "discover_seeds", boom)
+    with pytest.raises(RuntimeError):
+        await make(conn, client).run("https://e.com/")
+    (run,) = repo_runs.list_runs(conn)
+    assert run.status == "failed"
+    assert run.error == "RuntimeError: boom"
+    assert run.finished_at is not None
+
+
+@respx.mock
+async def test_a_start_url_httpx_cannot_request_fails_cleanly(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    report = await make(conn, client).run("https://1.2.3.999/")
+    assert report.status == "failed"
+    assert not respx.calls
+    assert repo_runs.get_run(conn, report.run_id).status == "failed"  # type: ignore[union-attr]
+
+
+@respx.mock
+async def test_malformed_sitemap_entries_do_not_abort_the_run(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    respx.get("https://e.com/robots.txt").mock(
+        return_value=httpx.Response(
+            200, text="Sitemap: https://e.com:abc/sm.xml\nSitemap: https://e.com/sitemap.xml\n"
+        )
+    )
+    index = """<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <sitemap><loc>https://[::1/x</loc></sitemap>
+    <sitemap><loc>https://e.com:abc/c.xml</loc></sitemap>
+    <sitemap><loc>https://e.com/c.xml</loc></sitemap></sitemapindex>"""
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(200, text=index))
+    respx.get("https://e.com/c.xml").mock(
+        return_value=httpx.Response(
+            200,
+            text='<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            "<url><loc>https://e.com/from-sitemap</loc></url></urlset>",
+        )
+    )
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html()))
+    respx.get("https://e.com/from-sitemap").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/")
+    assert report.status == "complete"
+    assert set(urls(conn, report.run_id)) == {"https://e.com/", "https://e.com/from-sitemap"}
+
+
+@respx.mock
+async def test_a_link_httpx_cannot_request_is_recorded_not_fatal(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(
+        return_value=httpx.Response(200, html=html("https://xn--a.e.com/x", "/ok"))
+    )
+    respx.get("https://e.com/ok").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/")
+    assert report.status == "complete"
+    pages = {p.url: p for p in repo_pages.list_pages(conn, report.run_id)}
+    assert pages["https://xn--a.e.com/x"].error == "bad_url"
+    assert pages["https://xn--a.e.com/x"].status == 0

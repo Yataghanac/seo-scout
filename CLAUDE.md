@@ -67,7 +67,7 @@ Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<i
 
 ## Pending
 
-Nothing open. The three review passes of 2026-09-06 are fixed and recorded in DECISIONS.md.
+Nothing open. The four review passes of 2026-09-06 are fixed and recorded in DECISIONS.md.
 
 ## Workflow
 

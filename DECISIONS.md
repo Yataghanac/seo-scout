@@ -222,7 +222,9 @@ base path, and a docs host often serves several such sites under one domain.
 **Decision.** With no robots hint, try the host root first and then `<start path>/sitemap.xml`
 when the start URL has a directory-like path (no dot in its last segment). One extra request at
 most, and it is only made when the start URL says the site is not at the root. Robots-declared
-sitemaps still take priority and skip both guesses.
+sitemaps still take priority and skip both guesses. *(Superseded twice since; the fourth
+review pass below has the current order: the start path's guesses first, each source with
+its own file budget, the host root only as a last resort.)*
 
 **Consequence worth knowing.** Seeds change crawl order. On a capped run the pages you get
 are the first N seeds, so a site that gains a sitemap between two runs will show a large
@@ -352,7 +354,8 @@ sitemap prefix walk that the previous pass had introduced.
 sent. `link_pair()` parses inside one `try` and returns None for anything the standard
 library rejects, so a bad anchor is one dropped link. `_request()` catches `InvalidURL` and
 reports `bad_redirect`; httpx has already discarded the response by then, so the row keeps
-status 0 (the same value a failed request gets) with the reason alongside. The `skipped`
+status 0 (the same value a failed request gets) with the reason alongside *(the fourth pass
+recovers the real status through a response hook)*. The `skipped`
 vocabulary now distinguishes `redirect_loop` (a hop already in the chain), `too_many_redirects`
 (ten distinct hops), `bad_redirect` (a Location no crawler can follow, `ftp://` included) and
 `off_site_redirect`, so the dashboard's error column says which one happened.
@@ -382,3 +385,53 @@ like every other row. The next-step hint quotes any database path a shell would 
 (`&`, `(`, whitespace), not only whitespace; `$` and `"` are left alone because bash and
 PowerShell escape them differently. The dashboard's *Start here* row for a page outside the
 loaded list shows the issue count and is not clickable, since there is no detail to open.
+
+## Post-launch — Fourth review pass: a run row never stays `running`
+
+**Trigger.** A review of the third pass found that its invariant ("nothing a page serves may
+abort a crawl") held for anchors and for two of the four ways a Location header can be
+unfollowable, and nowhere else. httpx wraps a malformed http(s) Location (`https://[::1/x`,
+`https://e.com:abc/`) into `RemoteProtocolError`, a transport error, so it was retried three
+times with backoff and counted towards the three-strikes abort. A sitemap-index child or a
+robots.txt `Sitemap:` line with the same shape raised straight out of discovery, because index
+children bypassed `link_pair` and `httpx.InvalidURL` is not an `HTTPError`. And discovery ran
+after `create_run` but outside any handler, so every one of these left the run row `running`
+forever, where `previous_run` would pick it up as the baseline for the next diff.
+
+**Decision: the invariant lives in one place.** `Crawler.run()` wraps everything after
+`create_run` in a handler that marks the run `failed` with the exception's name and message,
+then re-raises. Bugs still surface; they no longer poison the database. The specific holes
+are closed too, but the guard is what makes the promise true for the next one.
+
+**Decision: the fetcher never guesses.** httpx builds the next request from a Location header
+even with `follow_redirects=False`, and by the time it raises the response is closed. A
+response event hook, registered once per client, runs before that build and keeps the
+response in a task-local `ContextVar`; `_request()` hands it back as an ordinary 3xx attempt
+and `fetch()` classifies the Location with the same code as any other hop. The real status is
+stored, nothing is retried, and there is no exception-message sniffing. Building the request
+(`client.build_request`) happens outside that try, so a URL httpx refuses outright (a bad IPv4
+literal, an over-long URL, a malformed punycode label, which idna reports as a
+`UnicodeError`) is its own label, `bad_url`, with status 0 and no request made. The same
+`UNFETCHABLE` tuple guards the one-shot fetches of robots.txt and sitemaps, and
+`registrable_domain()` returns empty for anything the parser rejects, so `same_site()` is
+total: a hostile canonical href could have crashed the audit the same way.
+
+**Sitemap discovery, third and last ordering.** The start path's guesses come first because
+the user named that site; robots.txt sitemaps follow; the host root is tried only when robots
+names nothing and no guess answered, since after a hit it can only seed sibling sites. Each
+`drain` call has its own file budget (50) over a shared `visited` set, so a large index on
+either side cannot starve the other, which was the real defect behind both orderings. Every
+URL a sitemap names now goes through `link_pair` before anything touches it.
+
+**One shape, one order.** `Frontier` carries `(Link, depth)`, so `_process`, `_enqueue` and
+`_record_failure` take a `Link` instead of a key and a spelling as separate positionals; the
+docstring on `Link` is now true. `_enqueue` checks the frontier's `seen` set before asking
+protego: a link met again on later pages (most of them) paid ~13 us for a robots match that
+could not change anything, about two seconds per 5,000-page crawl. The API's score sort
+breaks ties like `summarize_run` (issue count, then URL), so the dashboard's loaded list
+always contains the pages its *Start here* panel names; the count-only fallback row stays as
+a degradation path, not a feature. The next-step hint always double-quotes the database path:
+bash strips an unquoted backslash (`C:\sites\t.db` arrives as `C:sitest.db`, and `connect()`
+would create that file), and double quotes are harmless in PowerShell and cmd. The
+`registrable_domain` cache test asserts `cache_info()` after `cache_clear()` instead of
+monkeypatching the extractor, so it cannot pass vacuously on a warm cache.

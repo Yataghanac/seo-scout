@@ -21,7 +21,7 @@ from seo_scout.logging import bind_run_id
 from seo_scout.models import FetchedPage
 from seo_scout.parse import parse_html
 from seo_scout.store import repo_pages, repo_runs
-from seo_scout.urls import normalize, same_site
+from seo_scout.urls import Link, normalize, same_site
 
 log = logging.getLogger("seo_scout.crawler")
 
@@ -117,6 +117,23 @@ class Crawler:
         run_id = repo_runs.create_run(self._conn, home, limits)
         bind_run_id(run_id)
         log.info("crawl started", extra={"start_url": home, **limits})
+        try:
+            return await self._crawl(
+                run_id, start_url, home=home, pages=pages_cap, depth=depth_cap, budget=budget
+            )
+        except Exception as exc:
+            # A bug, or a library error nothing anticipated: the row must not stay
+            # `running`, or every later pass and diff of this site would build on it.
+            why = f"{type(exc).__name__}: {exc}"
+            fetched = repo_pages.count_pages(self._conn, run_id)
+            repo_runs.finish_run(self._conn, run_id, "failed", pages=fetched, error=why)
+            log.error("crawl crashed", extra={"error": why})
+            raise
+
+    async def _crawl(
+        self, run_id: int, start_url: str, *, home: str, pages: int, depth: int, budget: float
+    ) -> CrawlReport:
+        s = self._settings
         started = time.monotonic()
         policy, seeds = await self._discover(start_url)  # verbatim: the seed is fetched as given
         if policy.disallow_all:
@@ -129,13 +146,13 @@ class Crawler:
         state = _State(
             run_id=run_id,
             home=home,
-            max_pages=pages_cap,
-            frontier=Frontier(max_depth=depth_cap),
+            max_pages=pages,
+            frontier=Frontier(max_depth=depth),
             policy=policy,
             limiter=RateLimiter(delay, self._sleep),
         )
-        for seed in seeds.pairs:  # every seed is same-site already; robots decides the rest
-            self._enqueue(state, seed.key, 0, seed.url)
+        for seed in seeds.pairs:
+            self._enqueue(state, seed, 0)
         status, error = await self._run_guarded(state, budget)
         repo_runs.finish_run(self._conn, run_id, status, pages=state.fetched, error=error)
         elapsed = time.monotonic() - started
@@ -184,34 +201,34 @@ class Crawler:
                 task.cancel()
             await asyncio.gather(*state.pending, return_exceptions=True)
 
-    async def _process(self, state: _State, url: str, depth: int, request: str) -> None:
+    async def _process(self, state: _State, link: Link, depth: int) -> None:
         await state.limiter.wait()
         try:
-            result = await self._fetcher.fetch(request, allowed=state.policy.allowed)
+            result = await self._fetcher.fetch(link.url, allowed=state.policy.allowed)
         except NetworkError as exc:
-            self._record_failure(state, url, depth, request, str(exc))
+            self._record_failure(state, link, depth, str(exc))
             return
         state.consecutive_failures = 0
         state.frontier.mark_seen(normalize(result.final_url) or result.final_url)
-        repo_pages.insert_page(self._conn, state.run_id, _to_page(result, depth, url))
+        repo_pages.insert_page(self._conn, state.run_id, _to_page(result, depth, link.key))
         state.fetched += 1
-        log.debug("fetched", extra={"url": url, "status": result.status, "skipped": result.skipped})
+        log.debug(
+            "fetched", extra={"url": link.key, "status": result.status, "skipped": result.skipped}
+        )
         if result.body is None:
             return
-        parsed = parse_html(result.body, result.final_url)
-        internal = {link.key: link.url for link in parsed.links if same_site(state.home, link.key)}
-        repo_pages.insert_links(self._conn, state.run_id, url, list(internal))
-        for key, link in internal.items():
-            self._enqueue(state, key, depth + 1, link)
+        parsed = parse_html(result.body, result.final_url)  # one Link per target page
+        internal = [found for found in parsed.links if same_site(state.home, found.key)]
+        repo_pages.insert_links(self._conn, state.run_id, link.key, [f.key for f in internal])
+        for found in internal:
+            self._enqueue(state, found, depth + 1)
 
-    def _record_failure(
-        self, state: _State, url: str, depth: int, request: str, error: str
-    ) -> None:
-        """`request` is the spelling that failed, stored as `final_url` like any other row."""
-        log.warning("fetch failed", extra={"url": url, "error": error})
+    def _record_failure(self, state: _State, link: Link, depth: int, error: str) -> None:
+        """The spelling that failed is stored as `final_url`, like any other row."""
+        log.warning("fetch failed", extra={"url": link.key, "error": error})
         page = FetchedPage(
-            url=url,
-            final_url=request,
+            url=link.key,
+            final_url=link.url,
             status=0,
             depth=depth,
             content_type=None,
@@ -230,16 +247,20 @@ class Crawler:
             )
 
     @staticmethod
-    def _enqueue(state: _State, url: str, depth: int, request: str) -> None:
+    def _enqueue(state: _State, link: Link, depth: int) -> None:
         """robots.txt is matched against what goes on the wire: `Disallow: /x/` spares /x.
 
-        Callers pass same-site URLs only (seeds are filtered by discovery, links by
+        Callers pass same-site links only (seeds are filtered by discovery, page links by
         `_process`); the same `policy.allowed` also gates every redirect hop in `fetch()`.
+        The seen check comes first: a link met again on later pages (most of them) must
+        not pay for a robots match that cannot change anything.
         """
-        if state.policy.allowed(request):
-            state.frontier.add(url, depth, request)
-        elif url not in state.frontier.seen:
-            log.debug("skipped by policy", extra={"url": url})
+        if link.key in state.frontier.seen:
+            return
+        if state.policy.allowed(link.url):
+            state.frontier.add(link, depth)
+        else:
+            log.debug("skipped by policy", extra={"url": link.key})
 
     async def _discover(self, home: str) -> tuple[RobotsPolicy, Seeds]:
         ua = self._settings.user_agent

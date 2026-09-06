@@ -100,8 +100,16 @@ def _domain_of(host: str) -> str:
 
 
 def registrable_domain(url: str) -> str:
-    """`blog.example.co.uk` -> `example.co.uk`; falls back to the hostname (localhost)."""
-    return _domain_of(urlsplit(url).hostname or "")
+    """`blog.example.co.uk` -> `example.co.uk`; falls back to the hostname (localhost).
+
+    Empty for anything the parser rejects: a canonical href or a sitemap entry is
+    untrusted text, and `same_site` must be total for it.
+    """
+    try:
+        host = urlsplit(url).hostname or ""
+    except ValueError:
+        return ""
+    return _domain_of(host)
 
 
 def same_site(a: str, b: str) -> bool:

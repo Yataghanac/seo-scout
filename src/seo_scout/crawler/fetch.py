@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from time import perf_counter
 from urllib.parse import urljoin
@@ -20,11 +21,28 @@ log = logging.getLogger("seo_scout.crawler.fetch")
 SleepFn = Callable[[float], Awaitable[None]]
 Allowed = Callable[[str], bool]
 
+# What httpx raises when asked to build a request the stdlib parser accepted: a bad IPv4
+# literal or an over-long URL (InvalidURL), a malformed punycode label (idna's errors are
+# UnicodeErrors). Discovery catches the same set around robots.txt and sitemap fetches.
+BAD_URL_ERRORS = (httpx.InvalidURL, UnicodeError)
+# What one `client.get` of untrusted text (a robots.txt line, a sitemap entry) can raise.
+UNFETCHABLE = (httpx.HTTPError, *BAD_URL_ERRORS)
+
 _HTML_TYPES = {"text/html", "application/xhtml+xml"}
 _REDIRECTS = {301, 302, 303, 307, 308}
 _ACCEPT = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1"
 MAX_TRIES = 3
 MAX_REDIRECTS = 10
+
+# httpx builds the next request from a Location header even with follow_redirects=False
+# and raises (InvalidURL, or RemoteProtocolError for a malformed http URL) when it cannot;
+# the response is closed and gone by then. Response hooks run before that build, so this
+# one keeps the response where `_request` can find it. Task-local: crawls run concurrently.
+_last_response: ContextVar[httpx.Response | None] = ContextVar("seo_scout_last", default=None)
+
+
+async def _remember(response: httpx.Response) -> None:
+    _last_response.set(response)
 
 
 class NetworkError(Exception):
@@ -41,9 +59,10 @@ class FetchResult(BaseModel):
     elapsed_ms: int
     redirect_chain: list[RedirectHop] = []
     headers: dict[str, str] = {}
-    # non_html | too_large | too_many_redirects (10 distinct hops) | redirect_loop (a hop
-    # already in this chain) | off_site_redirect | bad_redirect (Location is not an http(s)
-    # URL) | disallowed_redirect (the `allowed` gate refused a hop)
+    # non_html | too_large | bad_url (httpx refused to build the request; status 0) |
+    # too_many_redirects (10 distinct hops) | redirect_loop (a hop already in this chain) |
+    # off_site_redirect | bad_redirect (Location is not an http(s) URL) |
+    # disallowed_redirect (the `allowed` gate refused a hop)
     skipped: str | None = None
 
 
@@ -75,6 +94,25 @@ def _retry_after(headers: dict[str, str]) -> float | None:
         return None
 
 
+def _attempt_of(response: httpx.Response) -> _Attempt:
+    """Status and headers of a response whose body has not been read."""
+    headers = {k.lower(): v for k, v in response.headers.items()}
+    ctype = _content_type(headers.get("content-type"))
+    return _Attempt(status=response.status_code, content_type=ctype, headers=headers)
+
+
+def _redirect_target(current: str, location: str) -> str | None:
+    """Wire form of a Location header, or None when no crawler could follow it.
+
+    urljoin first, then resolve: a fragment-only Location (`#top`) resolved on its own is
+    a skipped anchor, joined to the current URL it is the same page (a loop).
+    """
+    try:
+        return resolve(urljoin(current, location))
+    except ValueError:  # urljoin parses too, and `https://[::1/x` fails there
+        return None
+
+
 class Fetcher:
     def __init__(
         self,
@@ -90,12 +128,15 @@ class Fetcher:
         self._max_bytes = max_bytes
         self._timeout = timeout
         self._sleep = sleep
+        hooks = client.event_hooks["response"]
+        if _remember not in hooks:
+            hooks.append(_remember)
 
     async def fetch(self, url: str, *, allowed: Allowed | None = None) -> FetchResult:
         """Fetch one URL, following same-site redirects and recording every hop.
 
-        `allowed` (robots.txt in the crawler) is asked before every hop, not only the
-        first request: a permitted `/go` that redirects into `/private/` must not fetch it.
+        `allowed` (robots.txt in the crawler) is asked before every hop: a permitted `/go`
+        that redirects into `/private/` must not fetch it.
         """
         started = perf_counter()
         chain: list[RedirectHop] = []
@@ -108,13 +149,11 @@ class Fetcher:
             if attempt.status not in _REDIRECTS or not location:
                 return self._result(url, current, attempt, chain, started)
             chain.append(RedirectHop(url=current, status=attempt.status))
-            # urljoin first, then resolve: a fragment-only Location (`#top`) resolved on
-            # its own is nothing, joined to the current URL it is the same page (a loop).
             # Request the path the server named (normalize() would collapse /a/ back to
             # /a and loop), but compare on the wire form: host case, a default port or a
             # fragment never change the request, so such a Location, or any URL already
             # in this chain (A->B->A), is a loop and stops here rather than after ten hops.
-            target = resolve(urljoin(current, location))
+            target = _redirect_target(current, location)
             if target is None:
                 attempt.skipped = "bad_redirect"
                 return self._result(url, current, attempt, chain, started)
@@ -136,8 +175,8 @@ class Fetcher:
         """HEAD first for binary-looking URLs so we never download a PDF to discover it is one."""
         if looks_binary(url):
             head = await self._with_retry("HEAD", url)
-            if head.status < 300 and head.content_type not in _HTML_TYPES:
-                head.skipped = "non_html"
+            if head.skipped or (head.status < 300 and head.content_type not in _HTML_TYPES):
+                head.skipped = head.skipped or "non_html"
                 return head
         return await self._with_retry("GET", url)
 
@@ -163,30 +202,35 @@ class Fetcher:
         raise AssertionError("unreachable")
 
     async def _request(self, method: str, url: str) -> _Attempt:
-        """One streamed request. Bodies are only read for 2xx HTML within the size cap."""
+        """One request. A URL httpx will not build is `bad_url`; a Location it cannot build
+        the next request from hands the response back for `fetch()` to classify."""
         try:
-            return await self._stream(method, url)
-        except httpx.InvalidURL:
-            # httpx builds the redirect target even with follow_redirects=False, and a
-            # `Location: javascript:void(0)` (mailto:, data:, tel:) makes it raise after
-            # the response was received and before we could see it. The status is gone
-            # with the response; what is known is that it was a redirect nobody can follow.
-            log.debug("unfollowable Location header", extra={"url": url})
-            return _Attempt(status=0, content_type=None, headers={}, skipped="bad_redirect")
+            request = self._client.build_request(
+                method, url, headers=self._headers, timeout=self._timeout
+            )
+        except BAD_URL_ERRORS as exc:
+            log.debug("httpx refused the URL", extra={"url": url, "error": str(exc)})
+            return _Attempt(status=0, content_type=None, headers={}, skipped="bad_url")
+        _last_response.set(None)
+        try:
+            return await self._stream(request)
+        except (httpx.InvalidURL, httpx.RemoteProtocolError):
+            response = _last_response.get()
+            if response is None or not response.has_redirect_location:
+                raise  # a real protocol error, retried like any transport error
+            return _attempt_of(response)
 
-    async def _stream(self, method: str, url: str) -> _Attempt:
-        async with self._client.stream(
-            method, url, headers=self._headers, timeout=self._timeout, follow_redirects=False
-        ) as response:
-            headers = {k.lower(): v for k, v in response.headers.items()}
-            ctype = _content_type(headers.get("content-type"))
-            attempt = _Attempt(status=response.status_code, content_type=ctype, headers=headers)
-            if method == "HEAD" or response.status_code >= 300:
+    async def _stream(self, request: httpx.Request) -> _Attempt:
+        """Bodies are only read for 2xx HTML within the size cap."""
+        response = await self._client.send(request, stream=True, follow_redirects=False)
+        try:
+            attempt = _attempt_of(response)
+            if request.method == "HEAD" or attempt.status >= 300:
                 return attempt
-            if ctype is not None and ctype not in _HTML_TYPES:
+            if attempt.content_type is not None and attempt.content_type not in _HTML_TYPES:
                 attempt.skipped = "non_html"
                 return attempt
-            declared = headers.get("content-length")
+            declared = attempt.headers.get("content-length")
             if declared and declared.isdigit() and int(declared) > self._max_bytes:
                 attempt.skipped = "too_large"
                 return attempt
@@ -197,8 +241,11 @@ class Fetcher:
                     attempt.skipped = "too_large"
                     return attempt
             attempt.size = len(buf)
-            attempt.body = buf.decode(_charset(headers.get("content-type")), errors="replace")
+            charset = _charset(attempt.headers.get("content-type"))
+            attempt.body = buf.decode(charset, errors="replace")
             return attempt
+        finally:
+            await response.aclose()
 
     @staticmethod
     def _result(

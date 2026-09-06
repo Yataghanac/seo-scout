@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import sqlite3
 import ssl
 import sys
@@ -192,17 +191,12 @@ def _next_step(db_path: str | None) -> None:
     typer.echo(hint, err=True)
 
 
-_SHELL_SAFE = re.compile(r"[A-Za-z0-9_.:/\\~-]+")
-
-
 def _quoted(path: str) -> str:
-    """Double quotes are understood by every shell the hint may be pasted into.
-
-    Anything beyond letters, digits and path punctuation (a space, `&`, `(`) is quoted.
-    `$` and `"` inside a path are left alone: bash and PowerShell escape them differently
-    and no common database path contains them.
-    """
-    return path if _SHELL_SAFE.fullmatch(path) else f'"{path}"'
+    """Always double-quoted: bash strips an unquoted backslash (`C:\\sites` -> `C:sites`),
+    and double quotes are read the same way by bash, PowerShell and cmd. A `$` or `"`
+    inside the path is not escaped: the shells disagree on how, and no database path
+    should contain one."""
+    return f'"{path}"'
 
 
 def _browser_url(host: str, port: int) -> str:

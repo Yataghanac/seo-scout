@@ -8,6 +8,8 @@ from urllib.parse import urljoin
 import httpx
 from protego import Protego
 
+from seo_scout.crawler.fetch import UNFETCHABLE
+
 log = logging.getLogger("seo_scout.crawler.robots")
 
 
@@ -54,7 +56,7 @@ async def fetch_robots(client: httpx.AsyncClient, site_url: str, user_agent: str
     robots_url = urljoin(site_url, "/robots.txt")
     try:
         response = await client.get(robots_url, headers={"user-agent": user_agent})
-    except httpx.HTTPError as exc:
+    except UNFETCHABLE as exc:  # unrequestable reads as unreachable
         log.warning("robots.txt unreachable, disallowing all", extra={"error": str(exc)})
         return RobotsPolicy(None, user_agent, disallow_all=True)
     if response.status_code >= 500:

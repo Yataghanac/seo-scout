@@ -217,15 +217,8 @@ def test_report_keeps_its_output_clean_for_schedulers(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("path", "expected"),
-    [
-        ("plain.db", "plain.db"),
-        (r"C:\sites\t.db", r"C:\sites\t.db"),
-        ("/home/me/.seo/t.db", "/home/me/.seo/t.db"),
-        ("C:/my sites/t.db", '"C:/my sites/t.db"'),
-        ("C:/R&D/t.db", '"C:/R&D/t.db"'),
-        ("/srv/docs (1)/t.db", '"/srv/docs (1)/t.db"'),
-    ],
+    "path", ["plain.db", r"C:\sites\t.db", "C:/my sites/t.db", "C:/R&D/t.db", "/srv/docs (1)/t.db"]
 )
-def test_quoted_wraps_anything_a_shell_would_split(path: str, expected: str) -> None:
-    assert cli._quoted(path) == expected
+def test_quoted_always_wraps_in_double_quotes(path: str) -> None:
+    """Bash strips an unquoted backslash (`C:\sites` -> `C:sites`); every shell keeps it quoted."""
+    assert cli._quoted(path) == f'"{path}"'

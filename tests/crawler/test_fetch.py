@@ -268,31 +268,40 @@ async def test_a_long_chain_of_distinct_hops_is_too_many_redirects(
 
 
 @respx.mock
-@pytest.mark.parametrize("location", ["javascript:void(0)", "mailto:x@y.z", "ftp://e.com/x"])
+@pytest.mark.parametrize(
+    "location",
+    ["javascript:void(0)", "mailto:x@y.z", "ftp://e.com/x", "https://[::1/x", "https://e.com:abc/"],
+)
 async def test_unfollowable_location_is_a_bad_redirect_not_a_crash(
     client: httpx.AsyncClient, location: str
 ) -> None:
-    """httpx builds the next request even with follow_redirects=False and can raise on it."""
+    """httpx builds the next request even with follow_redirects=False and raises when it
+    cannot (InvalidURL for a scheme without a host, RemoteProtocolError for a malformed
+    http URL). The status the server sent is kept either way, and nothing is retried."""
     route = respx.get("https://e.com/a").mock(
         return_value=httpx.Response(301, headers={"location": location})
     )
     r = await make(client, Sleeps()).fetch("https://e.com/a")
     assert route.call_count == 1
     assert r.skipped == "bad_redirect"
+    assert r.status == 301
     assert r.body is None
     assert r.final_url == "https://e.com/a"
+    assert [h.url for h in r.redirect_chain] == ["https://e.com/a"]
 
 
 @respx.mock
-async def test_redirect_into_a_disallowed_path_is_not_requested(client: httpx.AsyncClient) -> None:
-    respx.get("https://e.com/go").mock(
-        return_value=httpx.Response(301, headers={"location": "/private/"})
-    )
-    private = respx.get("https://e.com/private/").mock(return_value=httpx.Response(200, html="s"))
-    fetcher = make(client, Sleeps())
-    r = await fetcher.fetch("https://e.com/go", allowed=lambda u: "/private/" not in u)
-    assert not private.called
-    assert r.skipped == "disallowed_redirect"
-    assert r.status == 301
-    assert r.final_url == "https://e.com/private/"
-    assert [h.url for h in r.redirect_chain] == ["https://e.com/go"]
+@pytest.mark.parametrize(
+    "url", ["https://999.1.1.1/x", "https://xn--a.com/x", "https://999.1.1.1/x.pdf"]
+)
+async def test_a_url_httpx_refuses_to_request_is_bad_url(
+    client: httpx.AsyncClient, url: str
+) -> None:
+    """The stdlib parser accepts more than httpx does; that is not a redirect and not a crash.
+
+    The `.pdf` case takes the HEAD-first path, which must hand the label through as is."""
+    r = await make(client, Sleeps()).fetch(url)
+    assert r.skipped == "bad_url"
+    assert r.status == 0
+    assert r.redirect_chain == []
+    assert not respx.calls

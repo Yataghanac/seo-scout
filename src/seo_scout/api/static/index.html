@@ -199,8 +199,9 @@ function headline(p) {
 function renderStart() {
   // Same ranking as summary.worst_pages in the export and report (score, then issue count, then URL).
   const byUrl = new Map(state.pages.map((p) => [p.url, p]));
-  // worst_pages already excludes clean pages. A page outside the loaded list has no detail
-  // to open (showDetail only knows loaded pages), so its row shows the count and is not a link.
+  // worst_pages already excludes clean pages. The API sorts score ties the same way, so the
+  // worst pages are always among those loaded; if an API change ever breaks that, a page
+  // outside the list degrades to a count without a link (showDetail only knows loaded pages).
   const row = (w) => {
     const p = byUrl.get(w.url);
     const text = p ? headline(p) : `${w.issues} issue${w.issues === 1 ? "" : "s"} (not among the ${state.pages.length} pages loaded)`;

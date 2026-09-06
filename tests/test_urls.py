@@ -100,10 +100,16 @@ def test_link_pair_rejects_a_malformed_host_instead_of_raising(raw: str) -> None
     assert link_pair(raw, "https://e.com/") is None
 
 
-def test_registrable_domain_is_computed_once_per_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    """same_site runs per link; the suffix-list lookup must not."""
-    real, hosts = urls._extract, []
-    monkeypatch.setattr(urls, "_extract", lambda host: (hosts.append(host), real(host))[1])
+def test_registrable_domain_is_computed_once_per_host() -> None:
+    """same_site runs per link; the suffix-list lookup must run once per host."""
+    urls._domain_of.cache_clear()
     for i in range(5):
         assert same_site("https://once-a.com/", f"https://sub{i % 2}.once-a.com/p{i}")
-    assert len(hosts) == len(set(hosts))
+    info = urls._domain_of.cache_info()
+    assert (info.misses, info.hits) == (3, 7)  # 3 hosts, 10 lookups
+
+
+@pytest.mark.parametrize("raw", ["https://[::1/x", "not a url", ""])
+def test_same_site_never_raises_for_what_the_parser_rejects(raw: str) -> None:
+    """A canonical or sitemap entry is untrusted text; the audit and discovery call this."""
+    assert not same_site("https://e.com/", raw)

@@ -83,7 +83,9 @@ def select(
         and (rule is None or any(i.rule_id == rule for i in p.issues))
     ]
     keys = {
-        "score": lambda p: p.score,
+        # Same tiebreak as summarize_run's worst_pages, so the dashboard's loaded list
+        # always contains the pages its Start-here panel names.
+        "score": lambda p: (p.score, -len(p.issues), p.url),
         "url": lambda p: p.url,
         "issues": lambda p: len(p.issues),
         "status": lambda p: p.status,

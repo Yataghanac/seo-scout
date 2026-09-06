@@ -53,3 +53,11 @@ async def test_network_error_disallows_everything(client: httpx.AsyncClient) -> 
     respx.get("https://example.com/robots.txt").mock(side_effect=httpx.ConnectError("down"))
     policy = await fetch_robots(client, "https://example.com/", UA)
     assert not policy.allowed("https://example.com/")
+
+
+@respx.mock
+async def test_a_host_httpx_cannot_request_disallows_all(client: httpx.AsyncClient) -> None:
+    """Unrequestable is unreachable: the conservative reading, and never an exception."""
+    policy = await fetch_robots(client, "https://1.2.3.999/", UA)
+    assert policy.disallow_all
+    assert not respx.calls
