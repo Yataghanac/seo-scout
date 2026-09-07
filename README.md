@@ -56,7 +56,7 @@ crawls, diffs against the previous run and writes `reports/run-N.{json,md}`.
 flowchart LR
     CLI[typer CLI] --> C[crawler<br/>httpx · protego · selectolax]
     C -->|pages, links| S[(SQLite<br/>store/)]
-    S --> A[audit<br/>24 pure rules · 0–100 score]
+    S --> A[audit<br/>25 pure rules · 0–100 score]
     A -->|issues, scores| S
     S --> AI[ai<br/>GPT-4o Structured Outputs]
     AI --> V{validate.py}
@@ -177,7 +177,7 @@ schtasks /Create /SC WEEKLY /D MON /ST 06:00 /TN "SEO Scout" /TR "cmd /c cd /d C
 ## Development
 
 ```bash
-uv run pytest                                              # offline, ~8 s, zero network calls
+uv run pytest                                              # offline, ~10 s, zero network calls
 uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src/
 uv run pytest --cov=seo_scout.audit --cov=seo_scout.ai     # gate: 80%, currently 98%
 ```

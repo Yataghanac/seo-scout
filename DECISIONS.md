@@ -45,7 +45,7 @@ exists only in memory.
 
 ## Phase 2 — Deterministic audit engine
 
-**What it does.** Runs 24 pure rules over every HTML page of a run, scores each page out of
+**What it does.** Runs 25 pure rules over every HTML page of a run, scores each page out of
 100, and rolls the results up into a site summary. Works with no OpenAI key at all; this is
 the layer that always produces value.
 
@@ -577,3 +577,25 @@ fail the job it reports on is worse than no notifier.
 **`init` keeps its promise too.** Run twice, the second run refuses: `.env already exists`. A
 real key placed in that file survived, which is the only behaviour that matters for a command
 whose whole job is to not destroy credentials.
+
+## Post-launch — The README's numbers are claims, and now they are tested
+
+**Trigger.** Reading the front door end to end and checking each factual claim against the
+code, the same way everything else got checked this session. Most held: the hard caps, the
+rate limit, the user agent, the backoff policy, the robots reading of 4xx and 5xx, the score
+weights, the validator thresholds, the 4,000-character prompt slice and the 2,000-character
+cache slice, the coverage figure, and CI running exactly the four commands listed. Two did
+not. The architecture diagram said "24 pure rules" and the suite runs 25; `git log -S` shows
+all 25 arrived in the same Phase 2 commit, so this was a miscount from the day it was written
+rather than a count that drifted, and the Phase 2 entry below repeated it. The test suite had
+grown past the "~8 s" the README quotes.
+
+**Decision: pin the numbers that describe code.** `tests/test_readme.py` reads README.md and
+asserts the rule count in the diagram and in the fixture paragraph both equal `len(RULES)`,
+that the documented caps and rate limit are the values `Settings()` actually carries, and that
+the advertised user agent is the one the crawler sends. This follows the test that keeps
+`.env.example` identical to the packaged template: prose about code is an invariant, and an
+invariant nobody checks is a wish. It deliberately does not pin measured figures — the cost
+tables, the sample run, the wall-clock timing — because those are observations with dates on
+them, not statements about what the code does, and a test that fails when a crawl is 200 ms
+slower teaches people to ignore failures.
