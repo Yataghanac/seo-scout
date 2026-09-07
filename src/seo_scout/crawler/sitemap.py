@@ -102,6 +102,7 @@ class _Discovery:
     user_agent: str | None
     visited: set[str] = field(default_factory=set)
     found: dict[str, Link] = field(default_factory=dict)  # identity key -> first Link seen
+    parsed_files: int = 0  # files that were sitemaps, as opposed to locations tried
 
     async def drain(self, start: list[str], budget: int = MAX_SITEMAP_FILES) -> bool:
         """Fetch these sitemaps and their index children, at most `budget` files.
@@ -121,6 +122,7 @@ class _Discovery:
             if text is None or (parsed := parse_sitemap(text)) is None:
                 continue
             hit = True
+            self.parsed_files += 1
             children, pages = parsed
             queue.extend(c.url for c in map(link_pair, children) if c and self._mine(c))
             for link in map(link_pair, pages):
@@ -160,6 +162,14 @@ async def discover_seeds(
         await discovery.drain([_root_guess(home)])
     found = discovery.found
     pairs = [Link(home, start), *(link for key, link in found.items() if key != home)]
-    files = len(discovery.visited)
-    log.info("seeds discovered", extra={"sitemap_files": files, "seeds": len(pairs)})
+    # Two numbers, because a site with no sitemap still costs a handful of 404s: the
+    # files that parsed answer "what did we read", the fetches answer "where did we look".
+    log.info(
+        "seeds discovered",
+        extra={
+            "sitemap_files": discovery.parsed_files,
+            "sitemap_fetches": len(discovery.visited),
+            "seeds": len(pairs),
+        },
+    )
     return Seeds(pairs=pairs, from_sitemap=set(found))

@@ -115,6 +115,7 @@ def serve(
 ) -> None:
     """Serve the dashboard and JSON API."""
     settings = _settings(None, db_path, None, None)
+    _require_db(settings)
     url = _browser_url(host, port)
     typer.echo(f"dashboard: {url}  (db: {settings.db})")
     timer = _open_later(url) if open_browser else None
@@ -134,6 +135,7 @@ def diff(
 ) -> None:
     """Compare two runs: pages added/removed, score changes, issues fixed/introduced."""
     settings = _settings(None, db_path, None, None)
+    _require_db(settings)
     with closing(db.connect(settings.db)) as conn:
         for run_id in (run_a, run_b):
             if repo_runs.get_run(conn, run_id) is None:
@@ -334,7 +336,23 @@ def _echo_ai(r: AIRunReport) -> None:
         typer.echo(f"warning: {r.warning}", err=True)
 
 
+def _require_db(settings: Settings) -> None:
+    r"""Reading commands never create a database.
+
+    `db.connect` opens or creates, which is what `crawl` wants and never what `serve`,
+    `audit`, `ai` or `diff` want: a path that is not there is a typo, and a shell that ate
+    the backslashes out of `C:\sites\t.db` leaves no other trace. Inventing the file
+    turns that typo into an empty dashboard and a stray database in the working directory.
+    """
+    if settings.db != ":memory:" and not Path(settings.db).is_file():
+        raise typer.BadParameter(
+            f"database {settings.db} does not exist; "
+            f"crawl a site first: seo-scout crawl <url> --db {_quoted(settings.db)}"
+        )
+
+
 def _open_run(settings: Settings, run_id: int) -> sqlite3.Connection:
+    _require_db(settings)
     conn = db.connect(settings.db)
     if repo_runs.get_run(conn, run_id) is None:
         conn.close()

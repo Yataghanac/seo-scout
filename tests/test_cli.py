@@ -69,9 +69,10 @@ def test_audit_command_reaudits_an_existing_run() -> None:
 
 
 def test_audit_command_rejects_unknown_run() -> None:
+    test_crawl_writes_a_run_to_the_configured_db()  # the database has to exist to be read
     result = runner.invoke(app, ["audit", "42", "--db", "t.db"])
     assert result.exit_code != 0
-    assert "42" in result.output
+    assert "run 42 does not exist" in result.output
 
 
 def test_ai_command_without_key_degrades_cleanly() -> None:
@@ -220,5 +221,26 @@ def test_report_keeps_its_output_clean_for_schedulers(tmp_path: Path) -> None:
     "path", ["plain.db", r"C:\sites\t.db", "C:/my sites/t.db", "C:/R&D/t.db", "/srv/docs (1)/t.db"]
 )
 def test_quoted_always_wraps_in_double_quotes(path: str) -> None:
-    """Bash strips an unquoted backslash (`C:\sites` -> `C:sites`); every shell keeps it quoted."""
+    r"""Bash strips an unquoted backslash (`C:\sites` -> `C:sites`); every shell keeps it quoted."""
     assert cli._quoted(path) == f'"{path}"'
+
+
+def test_serve_refuses_a_database_that_does_not_exist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A mistyped path is not a new site: say so instead of serving an empty dashboard."""
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: None)
+    missing = tmp_path / "typo.db"
+    result = runner.invoke(app, ["serve", "--db", str(missing)])
+    assert result.exit_code != 0
+    assert "does not exist" in result.output
+    assert not missing.exists()
+
+
+@pytest.mark.parametrize("args", [["audit", "1"], ["ai", "1"], ["diff", "1", "2"]])
+def test_reading_commands_never_create_a_database(args: list[str], tmp_path: Path) -> None:
+    missing = tmp_path / f"{args[0]}.db"
+    result = runner.invoke(app, [*args, "--db", str(missing)])
+    assert result.exit_code != 0
+    assert "does not exist" in result.output
+    assert not missing.exists()

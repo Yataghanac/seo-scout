@@ -1,4 +1,7 @@
+import logging
+
 import httpx
+import pytest
 import respx
 
 from seo_scout.crawler.sitemap import discover_seeds
@@ -296,3 +299,33 @@ async def test_a_robots_sitemap_line_httpx_cannot_request_is_skipped(
         ["https://example.com:abc/sm.xml", "https://xn--a.com/s.xml"],
     )
     assert seeds.urls == ["https://example.com/"]
+
+
+@respx.mock
+async def test_counts_the_sitemaps_that_parsed_not_the_locations_tried(
+    client: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A site with no sitemap answers three 404s; it did not hand us three sitemaps."""
+    respx.get(url__regex=r"https://example\.com/.*").mock(return_value=httpx.Response(404))
+    with caplog.at_level(logging.INFO, logger="seo_scout.crawler.sitemap"):
+        seeds = await discover_seeds(client, "https://example.com/docs/guide/", [])
+    assert seeds.urls == ["https://example.com/docs/guide/"]
+    record = caplog.records[-1]
+    assert record.sitemap_files == 0
+    assert record.sitemap_fetches == 3
+
+
+@respx.mock
+async def test_counts_only_the_file_that_answered(
+    client: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    respx.get("https://example.com/docs/guide/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://example.com/docs/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://example.com/sm.xml").mock(return_value=httpx.Response(200, text=URLSET))
+    with caplog.at_level(logging.INFO, logger="seo_scout.crawler.sitemap"):
+        await discover_seeds(
+            client, "https://example.com/docs/guide/", ["https://example.com/sm.xml"]
+        )
+    record = caplog.records[-1]
+    assert record.sitemap_files == 1
+    assert record.sitemap_fetches == 3

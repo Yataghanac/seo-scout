@@ -1,9 +1,11 @@
+from contextlib import closing
 from typing import Any
 
 import pytest
 from typer.testing import CliRunner
 
 from seo_scout import cli
+from seo_scout.store import db
 
 runner = CliRunner()
 
@@ -15,6 +17,8 @@ def test_serve_starts_uvicorn_on_the_requested_port(monkeypatch: pytest.MonkeyPa
         captured["app"] = app
         captured.update(kwargs)
 
+    with closing(db.connect("x.db")):  # serve reads a database, it never creates one
+        pass
     monkeypatch.setattr(cli.uvicorn, "run", fake_run)
     result = runner.invoke(cli.app, ["serve", "--port", "8123", "--db", "x.db"])
     assert result.exit_code == 0, result.output

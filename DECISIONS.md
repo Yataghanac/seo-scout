@@ -435,3 +435,41 @@ bash strips an unquoted backslash (`C:\sites\t.db` arrives as `C:sitest.db`, and
 would create that file), and double quotes are harmless in PowerShell and cmd. The
 `registrable_domain` cache test asserts `cache_info()` after `cache_clear()` instead of
 monkeypatching the extractor, so it cannot pass vacuously on a warm cache.
+
+## Post-launch — First live run since the review passes
+
+**Trigger.** The four review passes rewrote fetching, redirect classification and sitemap
+discovery, and every run in the database predated them: the new code had only ever met respx
+mocks. A live pass — `docs.astral.sh/uv` crawled, audited, rewritten, crawled again and
+diffed, then `books.toscrape.com` for a site that publishes no sitemap — confirmed the design
+holds where it was rewritten. The normalize/resolve split requested `/uv/concepts/` and stored
+`/uv/concepts` with an empty redirect chain, while the start URL, requested verbatim, kept its
+real 308. A start URL that 404s still produced a crawl, because the prefix guess found
+`/uv/sitemap.xml` and seeded from there. The second run cost $0.0000: all 25 suggestions came
+back from the cache, and the diff reported no change. Two things did not hold, and both were
+found by using the tool rather than by reading it.
+
+**Decision: a reading command never creates a database.** `db.connect` opens or creates, which
+is what `crawl` wants and never what `serve`, `audit`, `ai` or `diff` want. Serving a path that
+does not exist produced an empty dashboard reading "No runs yet", a stray SQLite file in the
+working directory, and no hint that the path was wrong — which is exactly what happened when a
+launcher passed the database path through a shell that ate its backslashes, turning
+`C:\Users\PC\...\live.db` into `C:sersCppData...ive.db`. The project already knew that failure
+mode: `_quoted()` exists because bash strips an unquoted backslash. It defended the hint it
+prints and not the command that receives it. `_require_db()` now refuses a missing file for
+all four reading commands, naming the path and the crawl that would create it; `:memory:` is
+still allowed. `crawl` and `report` are unchanged, because creating is their job.
+
+**Decision: count the sitemaps that answered, not the places we looked.** `sitemap_files` was
+`len(visited)`, the number of locations tried, so a site with no sitemap at all reported having
+read four of them — the one number a reader would use to decide whether discovery worked. The
+count is now the number of files that parsed as a sitemap, and the locations tried are reported
+alongside as `sitemap_fetches`. Both are worth having: together they say "we looked in four
+places and read none", which is the actual diagnosis.
+
+**A test that passed for the wrong reason.** `test_audit_command_rejects_unknown_run` asserted
+`"42" in result.output` against a database that did not exist, so it never reached the
+unknown-run branch — and it passed anyway, because `42` is a substring of
+`max_response_bytes=5242880` in the effective-config line. It now crawls first and asserts on
+the message it means to test. A substring assertion on a short number is a coin flip against
+any line that prints numbers.
