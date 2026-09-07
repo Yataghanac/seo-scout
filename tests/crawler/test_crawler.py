@@ -524,6 +524,85 @@ async def test_a_redirect_into_a_target_ok_blocked_url_is_refused(
 
 
 @respx.mock
+async def test_a_sitemap_named_in_robots_that_target_ok_refuses_is_not_fetched(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    """FINDING 1a: discovery ran before the composed gate existed, so a `Sitemap:` line in
+    robots.txt could point anywhere — including the cloud metadata endpoint — and it was
+    fetched with no check at all.
+    """
+    respx.get("https://e.com/robots.txt").mock(
+        return_value=httpx.Response(
+            200,
+            text="User-agent: *\nAllow: /\nSitemap: http://169.254.169.254/latest/meta-data/\n",
+        )
+    )
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html()))
+    metadata = respx.get("http://169.254.169.254/latest/meta-data/").mock(
+        return_value=httpx.Response(200, text="ami-id")
+    )
+    crawler = make(conn, client)
+    crawler.target_ok = lambda u: "169.254" not in u
+    report = await crawler.run("https://e.com/")
+    assert not metadata.called
+    assert report.status == "complete"
+    assert set(urls(conn, report.run_id)) == {"https://e.com/"}
+
+
+@respx.mock
+async def test_a_sitemap_redirect_into_a_target_ok_blocked_url_is_not_followed(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    """FINDING 1b: `_get_text` used `follow_redirects=True` with no per-hop check, unlike
+    `Fetcher.fetch`. A same-site sitemap.xml that 302s must not be able to smuggle the crawler
+    into a `target_ok`-refused address.
+    """
+    respx.get("https://e.com/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/sitemap.xml").mock(
+        return_value=httpx.Response(302, headers={"location": "http://127.0.0.1:9999/secret"})
+    )
+    secret = respx.get("http://127.0.0.1:9999/secret").mock(
+        return_value=httpx.Response(200, text="urlset")
+    )
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html()))
+    crawler = make(conn, client)
+    crawler.target_ok = lambda u: "127.0.0.1" not in u
+    report = await crawler.run("https://e.com/")
+    assert not secret.called
+    assert report.status == "complete"
+    assert set(urls(conn, report.run_id)) == {"https://e.com/"}
+
+
+@respx.mock
+async def test_target_ok_left_open_sitemap_discovery_still_works(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    """REGRESSION GUARD: with `target_ok` at its permissive default, a `Sitemap:` line in
+    robots.txt is still read and its URLs still seed the crawl — the Finding 1 fix gates
+    discovery, it does not disable it.
+    """
+    respx.get("https://e.com/robots.txt").mock(
+        return_value=httpx.Response(
+            200, text="User-agent: *\nAllow: /\nSitemap: https://e.com/sm.xml\n"
+        )
+    )
+    respx.get("https://e.com/sm.xml").mock(
+        return_value=httpx.Response(
+            200,
+            text='<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            "<url><loc>https://e.com/from-sitemap</loc></url></urlset>",
+        )
+    )
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html()))
+    respx.get("https://e.com/from-sitemap").mock(return_value=httpx.Response(200, html=html()))
+    crawler = make(conn, client)
+    assert crawler.target_ok("https://e.com/sm.xml") is True  # left at its default
+    report = await crawler.run("https://e.com/")
+    assert report.status == "complete"
+    assert set(urls(conn, report.run_id)) == {"https://e.com/", "https://e.com/from-sitemap"}
+
+
+@respx.mock
 async def test_target_ok_left_open_still_honours_robots_disallow(
     conn: sqlite3.Connection, client: httpx.AsyncClient
 ) -> None:

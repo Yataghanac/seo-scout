@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit
 
@@ -12,7 +13,7 @@ from defusedxml import ElementTree
 from pydantic import BaseModel
 
 from seo_scout.crawler.fetch import UNFETCHABLE
-from seo_scout.urls import Link, link_pair, same_site
+from seo_scout.urls import Link, link_pair, resolve, same_site
 
 log = logging.getLogger("seo_scout.crawler.sitemap")
 
@@ -20,7 +21,12 @@ log = logging.getLogger("seo_scout.crawler.sitemap")
 # files, so a large index on one side cannot starve the other.
 MAX_SITEMAP_FILES = 50
 MAX_PREFIX_GUESSES = 3
+# A same-site sitemap.xml commonly 302s http -> https; robots.txt can also name a sitemap
+# that redirects once. Three hops covers real sites without giving a hostile Location chain
+# room to stall discovery.
+MAX_SITEMAP_REDIRECTS = 3
 _SITEMAP_ROOTS = {"urlset", "sitemapindex"}
+_REDIRECTS = {301, 302, 303, 307, 308}
 
 
 class Seeds(BaseModel):
@@ -63,15 +69,49 @@ def parse_sitemap(xml: str) -> tuple[list[str], list[str]] | None:
     return children, pages
 
 
-async def _get_text(client: httpx.AsyncClient, url: str, user_agent: str | None) -> str | None:
-    """The file's text on a 200, else None: unreachable, unrequestable and 404 read alike."""
-    headers = {"user-agent": user_agent} if user_agent else {}
+def _redirect_target(current: str, location: str) -> str | None:
+    """Wire form of a `Location` header, or None when no crawler could follow it."""
     try:
-        response = await client.get(url, headers=headers, follow_redirects=True)
-    except UNFETCHABLE as exc:
-        log.debug("sitemap fetch failed", extra={"url": url, "error": str(exc)})
+        return resolve(urljoin(current, location))
+    except ValueError:
         return None
-    return response.text if response.status_code == 200 else None
+
+
+async def _get_text(
+    client: httpx.AsyncClient,
+    url: str,
+    user_agent: str | None,
+    allowed: Callable[[str], bool],
+) -> str | None:
+    """The file's text on a 200, else None: unreachable, unrequestable, refused and 404 read
+    alike.
+
+    Redirects are followed by hand, `allowed` re-checked before every request including the
+    first: `follow_redirects=True` would hand a `Location` straight to the network with no
+    check at all, and `Fetcher.fetch` cannot be reused here because it also enforces an HTML
+    content-type, which would reject sitemap XML as `non_html`.
+    """
+    headers = {"user-agent": user_agent} if user_agent else {}
+    current = url
+    for _ in range(MAX_SITEMAP_REDIRECTS + 1):
+        if not allowed(current):
+            log.debug("sitemap fetch refused by target policy", extra={"url": current})
+            return None
+        try:
+            response = await client.get(current, headers=headers, follow_redirects=False)
+        except UNFETCHABLE as exc:
+            log.debug("sitemap fetch failed", extra={"url": current, "error": str(exc)})
+            return None
+        if response.status_code == 200:
+            return response.text
+        location = response.headers.get("location")
+        if response.status_code not in _REDIRECTS or not location:
+            return None
+        target = _redirect_target(current, location)
+        if target is None:
+            return None
+        current = target
+    return None
 
 
 def _root_guess(home: str) -> str:
@@ -100,6 +140,7 @@ class _Discovery:
     client: httpx.AsyncClient
     home: str
     user_agent: str | None
+    allowed: Callable[[str], bool]
     visited: set[str] = field(default_factory=set)
     found: dict[str, Link] = field(default_factory=dict)  # identity key -> first Link seen
     parsed_files: int = 0  # files that were sitemaps, as opposed to locations tried
@@ -109,7 +150,9 @@ class _Discovery:
 
         True if at least one parsed as a sitemap. `visited` is shared across calls so no
         file is fetched twice; the budget is per call so one source cannot starve another.
-        Every URL a sitemap names is untrusted text: it goes through `link_pair` first.
+        Every URL a sitemap names is untrusted text: it goes through `link_pair` first, and
+        `allowed` (robots.txt composed with `target_ok`) is checked on every fetch here too —
+        a `Sitemap:` line or a redirect can point off the site being crawled entirely.
         """
         queue, hit, fetched = deque(start), False, 0
         while queue and fetched < budget:
@@ -118,7 +161,7 @@ class _Discovery:
                 continue
             self.visited.add(sitemap_url)
             fetched += 1
-            text = await _get_text(self.client, sitemap_url, self.user_agent)
+            text = await _get_text(self.client, sitemap_url, self.user_agent, self.allowed)
             if text is None or (parsed := parse_sitemap(text)) is None:
                 continue
             hit = True
@@ -140,6 +183,7 @@ async def discover_seeds(
     robots_sitemaps: list[str],
     *,
     user_agent: str | None = None,
+    allowed: Callable[[str], bool] | None = None,
 ) -> Seeds:
     """Start URL first, then every same-site URL found in sitemaps (index files followed).
 
@@ -149,9 +193,13 @@ async def discover_seeds(
     Only when robots names none and no guess answered is the host root `/sitemap.xml`
     tried: after a hit it would only seed the host's sibling sites. URLs are kept as the
     sitemap spelled them (that is what gets requested) with their identity keys alongside.
+
+    `allowed` gates every sitemap fetch and every redirect hop it follows (see `_get_text`);
+    it defaults to permit-all so the CLI, which has no second gate beside robots.txt, is
+    unaffected.
     """
     home, start = link_pair(site_url) or Link(site_url, site_url)
-    discovery = _Discovery(client, home, user_agent)
+    discovery = _Discovery(client, home, user_agent, allowed or (lambda _url: True))
     hit = False
     for guess in _prefix_guesses(start):
         if hit := await discovery.drain([guess]):
