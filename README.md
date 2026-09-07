@@ -199,18 +199,24 @@ Whatever a client pastes in is a URL this server is about to request, so `POST /
 refuses loopback, private, link-local and reserved addresses (including the
 `169.254.169.254` cloud metadata endpoint), bare hostnames, and `.local`/`.internal` names — for
 the address the host actually resolves to, not just the literal text, and on every redirect hop
-the crawl follows, not only the URL that was pasted. An allowlisted domain that happens to
-resolve into a private range is still refused: the allowlist narrows which public sites may be
-crawled, it is not an exception to the address rules. This check applies to the dashboard's
-`POST /api/crawls` only — `seo-scout crawl` from the CLI is unrestricted, which is what lets
-`dev/fixture_site.py` crawl `127.0.0.1`.
+the crawl follows, not only the URL that was pasted. That includes robots.txt and sitemap
+discovery: a `Sitemap:` line robots.txt names, and any redirect a sitemap fetch itself returns,
+are checked exactly like a page link before the server requests them. An allowlisted domain
+that happens to resolve into a private range is still refused: the allowlist narrows which
+public sites may be crawled, it is not an exception to the address rules. This check applies to
+the dashboard's `POST /api/crawls` only — `seo-scout crawl` from the CLI is unrestricted, which
+is what lets `dev/fixture_site.py` crawl `127.0.0.1`.
 
 Honest limitations of this feature:
 
-- **DNS rebinding is not defended.** The address check resolves the host once; nothing pins that
-  address through to the request that actually fetches it, so a host that answers safely at
-  check time and differently a moment later would pass. Closing this means threading the
-  resolved address through httpx's connection, which has not been done.
+- **DNS rebinding is not defended.** The address check's own DNS lookup is cached for 60
+  seconds per host (so a crawl that asks it about the same host many times pays for one
+  lookup, not one per link) and nothing pins the resolved address through to the request
+  that actually fetches it — the connection re-resolves the host on its own. A host an
+  attacker controls the DNS for can answer safely whenever it is checked and differently
+  whenever it is fetched, at any point after the first check, not only in a narrow window
+  right after it. Closing this means threading the resolved address through httpx's
+  connection, which has not been done.
 - **No cancel.** A running crawl cannot be stopped from the dashboard. `--max-pages` and the
   30-minute wall clock bound how long a mistaken crawl runs.
 - **One crawl at a time**, with no queue — a second `POST /api/crawls` while one is running gets
