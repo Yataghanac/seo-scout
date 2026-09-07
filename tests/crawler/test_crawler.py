@@ -500,6 +500,53 @@ async def test_malformed_sitemap_entries_do_not_abort_the_run(
 
 
 @respx.mock
+async def test_a_redirect_into_a_target_ok_blocked_url_is_refused(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    """The second gate (`target_ok`) also gates every redirect hop, exactly like robots.txt.
+
+    `fetch.py` records this as `disallowed_redirect` regardless of which of the two gates
+    refused the hop.
+    """
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/go")))
+    respx.get("https://e.com/go").mock(
+        return_value=httpx.Response(302, headers={"location": "/blocked"})
+    )
+    blocked = respx.get("https://e.com/blocked").mock(return_value=httpx.Response(200, html=html()))
+    crawler = make(conn, client)
+    crawler.target_ok = lambda u: "blocked" not in u
+    report = await crawler.run("https://e.com/")
+    assert not blocked.called
+    pages = {p.url: p for p in repo_pages.list_pages(conn, report.run_id)}
+    assert set(pages) == {"https://e.com/", "https://e.com/go"}
+    assert pages["https://e.com/go"].error == "disallowed_redirect"
+
+
+@respx.mock
+async def test_target_ok_left_open_still_honours_robots_disallow(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    """THE REGRESSION GUARD: with `target_ok` at its permissive default, robots.txt disallow
+    must still be enforced. This fails if the two gates are ever composed with `or` instead
+    of `and`, or if any call site of `policy.allowed` is left uncomposed.
+    """
+    respx.get("https://e.com/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nDisallow: /private\n")
+    )
+    respx.get("https://e.com/sitemap.xml").mock(return_value=httpx.Response(404))
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/private/x")))
+    private = respx.get("https://e.com/private/x").mock(
+        return_value=httpx.Response(200, html=html())
+    )
+    crawler = make(conn, client)
+    assert crawler.target_ok("https://e.com/private/x") is True  # left at its default
+    report = await crawler.run("https://e.com/")
+    assert not private.called
+    assert set(urls(conn, report.run_id)) == {"https://e.com/"}
+
+
+@respx.mock
 async def test_a_link_httpx_cannot_request_is_recorded_not_fatal(
     conn: sqlite3.Connection, client: httpx.AsyncClient
 ) -> None:

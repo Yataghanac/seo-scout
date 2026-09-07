@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from sqlite3 import Connection
@@ -66,6 +67,7 @@ class _State:
     frontier: Frontier
     policy: RobotsPolicy
     limiter: RateLimiter
+    allowed: Callable[[str], bool]
     scheduled: int = 0
     fetched: int = 0
     consecutive_failures: int = 0
@@ -92,12 +94,21 @@ class Crawler:
             timeout=settings.request_timeout,
             sleep=sleep,
         )
+        # A second gate beside robots.txt, set by whoever built this crawler. The API sets it
+        # so a client-supplied URL cannot redirect into the network; the CLI leaves it open.
+        self.target_ok: Callable[[str], bool] = lambda _url: True
+
+    def _gate(self, policy: RobotsPolicy) -> Callable[[str], bool]:
+        """robots.txt composed with `target_ok`. Every call site must use this, never
+        `policy.allowed` directly, or a client-supplied URL could redirect into the network."""
+        return lambda url: policy.allowed(url) and self.target_ok(url)
 
     async def plan(self, start_url: str) -> list[str]:
         """Dry run: the seed URLs a crawl would start from. Fetches only robots and sitemaps."""
         self._home(start_url)  # rejects non-http(s) input before any request
         policy, seeds = await self._discover(start_url)
-        return [u for u in seeds.urls if policy.allowed(u)]
+        gate = self._gate(policy)
+        return [u for u in seeds.urls if gate(u)]
 
     async def run(
         self,
@@ -150,6 +161,7 @@ class Crawler:
             frontier=Frontier(max_depth=depth),
             policy=policy,
             limiter=RateLimiter(delay, self._sleep),
+            allowed=self._gate(policy),
         )
         for seed in seeds.pairs:
             self._enqueue(state, seed, 0)
@@ -204,7 +216,7 @@ class Crawler:
     async def _process(self, state: _State, link: Link, depth: int) -> None:
         await state.limiter.wait()
         try:
-            result = await self._fetcher.fetch(link.url, allowed=state.policy.allowed)
+            result = await self._fetcher.fetch(link.url, allowed=state.allowed)
         except NetworkError as exc:
             self._record_failure(state, link, depth, str(exc))
             return
@@ -251,13 +263,14 @@ class Crawler:
         """robots.txt is matched against what goes on the wire: `Disallow: /x/` spares /x.
 
         Callers pass same-site links only (seeds are filtered by discovery, page links by
-        `_process`); the same `policy.allowed` also gates every redirect hop in `fetch()`.
-        The seen check comes first: a link met again on later pages (most of them) must
-        not pay for a robots match that cannot change anything.
+        `_process`); the same composed gate (`state.allowed`: robots.txt and `target_ok`)
+        also gates every redirect hop in `fetch()`. The seen check comes first: a link met
+        again on later pages (most of them) must not pay for a robots match that cannot
+        change anything.
         """
         if link.key in state.frontier.seen:
             return
-        if state.policy.allowed(link.url):
+        if state.allowed(link.url):
             state.frontier.add(link, depth)
         else:
             log.debug("skipped by policy", extra={"url": link.key})

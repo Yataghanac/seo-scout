@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-import ssl
 import sys
 import threading
 import webbrowser
@@ -14,7 +13,6 @@ from importlib import resources
 from pathlib import Path
 from typing import Annotated, Any
 
-import httpx
 import truststore
 import typer
 import uvicorn
@@ -25,6 +23,7 @@ from seo_scout.ai.pipeline import AIRunReport, enrich_run
 from seo_scout.api.app import create_app
 from seo_scout.audit.service import audit_run, summarize_run
 from seo_scout.config import Settings
+from seo_scout.crawl_runner import BackgroundCrawler, build_client
 from seo_scout.crawler.crawler import Crawler
 from seo_scout.diff.differ import RunDiff
 from seo_scout.diff.notify import post_slack, slack_summary
@@ -118,9 +117,17 @@ def serve(
     _require_db(settings)
     url = _browser_url(host, port)
     typer.echo(f"dashboard: {url}  (db: {settings.db})")
+    auth = "on" if settings.dashboard_token else "off (anyone who can reach this port)"
+    typer.echo(f"auth: {auth}")
     timer = _open_later(url) if open_browser else None
     try:
-        app = create_app(settings.db, wall_clock_seconds=settings.wall_clock_seconds)
+        app = create_app(
+            settings.db,
+            crawl_runner=BackgroundCrawler(settings, allowlist=settings.allowed_domains),
+            token=settings.dashboard_token,
+            allowlist=settings.allowed_domains,
+            wall_clock_seconds=settings.wall_clock_seconds,
+        )
         uvicorn.run(app, host=host, port=port, log_level="warning")
     finally:
         if timer is not None:
@@ -254,16 +261,6 @@ def _run(coro: Any) -> Any:
         raise typer.Exit(code=130) from None
 
 
-def _client(settings: Settings) -> httpx.AsyncClient:
-    tls = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    return httpx.AsyncClient(
-        http2=False,
-        headers={"user-agent": settings.user_agent},
-        timeout=settings.request_timeout,
-        verify=tls,
-    )
-
-
 async def _crawl(
     settings: Settings,
     url: str,
@@ -274,7 +271,7 @@ async def _crawl(
 ) -> int | None:
     """Crawl, audit, enrich. Returns the run id, or None for a dry run or a failed crawl."""
     with closing(db.connect(settings.db)) as conn:
-        async with _client(settings) as client:
+        async with build_client(settings) as client:
             crawler = Crawler(settings=settings, conn=conn, client=client)
             if dry_run:
                 for seed in await crawler.plan(url):
