@@ -599,3 +599,86 @@ invariant nobody checks is a wish. It deliberately does not pin measured figures
 tables, the sample run, the wall-clock timing — because those are observations with dates on
 them, not statements about what the code does, and a test that fails when a crawl is 200 ms
 slower teaches people to ignore failures.
+
+## Post-launch — A crawl button, and the SSRF gate behind it
+
+**Trigger.** The dashboard could read a run but never start one, so the empty state told a
+first-time visitor to go open a terminal. Making `POST /api/crawls` real for a **hosted**
+deployment — a client reaches this dashboard, not just its author — turns "which URL to crawl"
+from a CLI argument only the operator can type into free text a stranger can submit, so target
+safety and authentication stopped being optional.
+
+**Decision: the crawler is injected, not imported.** `api/` may depend on `store` only
+(CLAUDE.md); it must not import `crawler/`. `create_app` takes an optional `crawl_runner:
+CrawlRunner | None`, a `Protocol` with one method, `start(url, max_pages) -> bool`. The real
+implementation, `crawl_runner.BackgroundCrawler`, lives in its own module and imports both
+`api.targets` and `crawler.crawler` freely; `cli.serve` wires it in, the way `cli._crawl` already
+built its own `Crawler`. This is the same seam the project already uses for the OpenAI
+`Completer` and the crawler's `sleep` function — nothing about the layering rule needed amending,
+a fourth thing just got injected through it. An embedder that only wants the read-only API passes
+no runner, and `POST /api/crawls` answers `501`.
+
+**Decision: target safety composes into the crawler's existing per-hop gate.** A public URL can
+redirect into `169.254.169.254` on its second hop, and `Fetcher.fetch` already calls an `allowed`
+predicate before every hop — that is what the third review pass added, for robots.txt. Rather
+than bolt on a second check that only the first request would see, `Crawler.target_ok` is a
+predicate the caller may set (default: allow everything, which is what the CLI gets), and
+`Crawler._gate` composes it with `policy.allowed`: `lambda url: policy.allowed(url) and
+self.target_ok(url)`. Both `_enqueue` and `_process` now call that composed callable and never
+`policy.allowed` directly, so a redirect chain is checked exactly as thoroughly as the first
+request, through code already proven correct for robots.
+
+**Decision: the allowlist narrows, it never widens.** `SEO_SCOUT_ALLOWED_DOMAINS` restricts a
+deployment to specific registrable domains; it answers "which sites may this deployment audit",
+not "which sites may skip the address rules". `targets.check_url` and `resolve_reason` run
+unconditionally, allowlist or not: an allowlisted domain that resolves into a private range is
+refused exactly like any other. Treating the allowlist as a bypass would turn a safety feature
+into the thing that defeats the other safety feature the moment an operator configured it.
+
+**Decision: the gate is on the API path only.** `seo-scout crawl http://127.0.0.1:8099/` still
+works from the CLI, unchanged — `dev/fixture_site.py` depends on it, and the person typing a URL
+into a terminal already has shell access to the box, so the check has nothing left to prove
+there. The check exists for the person typing into a browser, who does not.
+
+**Decision: reconciliation uses a wall-clock cutoff, not "every running row".** A process killed
+mid-crawl leaves its run row `running` forever, which `previous_run` would then pick as the diff
+baseline. Marking every `running` row `failed` on `serve` startup would also kill a CLI crawl
+that happens to be running against the same database file when `serve` starts. Only rows older
+than `wall_clock_seconds` (the crawler's own hard cap) are touched: nothing legitimate can still
+be running past that age, so reconciliation cannot be wrong in the direction the fourth review
+pass already fixed for in-process crashes.
+
+**Decision: no cancel, on purpose.** `asyncio.Task.cancel()` raises `asyncio.CancelledError`
+inside the crawl, and that exception derives from `BaseException`, not `Exception` —
+`Crawler.run`'s own guard (the one that marks a run `failed` on any exception, from the fourth
+review pass) only catches `Exception`, so a cancelled task would leave the row `running` and
+defeat the reconciliation this pass just added. A cancel button that is actually safe means
+threading a cooperative stop signal through the fetch loop instead of relying on `Task.cancel()`,
+which is real work left undone; `--max-pages` and the 30-minute wall clock bound a mistaken crawl
+instead.
+
+**Bug: two routes never had the auth they were supposed to have.** `token_guard` is a dependency
+on `router`, and `app.include_router(router, dependencies=[Depends(token_guard)])` is where every
+`/api/*` route gets it — except FastAPI mounts `/api/docs` and `/openapi.json` on the `FastAPI`
+app itself, not through `router`, so neither one ever passed through the guard. A hosted
+deployment with a token configured was still handing an unauthenticated caller the full API
+schema. The fix does not add a guard to a route FastAPI does not let you attach one to:
+`docs_url` and `openapi_url` are set to `None` outright whenever a token is configured, so the
+routes do not exist at all (`404`, not `401` — a caller cannot even confirm they were once
+there), and left alone when no token is set, since an unauthenticated local deployment has no
+schema to protect in the first place.
+
+**Bug: the endpoint ran in a threadpool and returned 500 for every request, and 441 tests
+passed anyway.** `POST /api/crawls` was declared `def`, which FastAPI runs in a worker thread
+because a synchronous function might block. `BackgroundCrawler.start` calls
+`asyncio.create_task()`, which requires a running event loop in the calling thread — a
+threadpool worker has none, so every real call raised `RuntimeError: no running event loop` and
+the endpoint answered `500`. The full suite was green through this: every test that posted to
+`/api/crawls` injected a fake runner whose `start()` just appends to a list, so nothing in the
+suite ever called `create_task` and nothing ever hit the missing loop. The fix makes the handler
+`async def`, which FastAPI then runs on the event loop directly, and moves the one blocking step
+— the DNS lookup inside `resolve_reason` — off that loop with `asyncio.to_thread`, so a slow or
+hanging resolution cannot freeze it for every other request. The regression test that would have
+caught this, `test_a_real_runner_actually_schedules_the_crawl`, uses a real `BackgroundCrawler`
+for exactly that reason: a fake collaborator that never exercises the thing that broke cannot be
+trusted to prove the seam works.

@@ -11,9 +11,21 @@ does with their data. Adjust the *Support* and *Liability* sections to your own 
 | HTTP requests for the customer's pages | the customer's own web server | every crawl |
 | Up to 4,000 characters of visible page text, plus the current title and meta | OpenAI (`api.openai.com`), under the API key in `.env` | only for pages that failed a title or meta rule, and only when a key is configured |
 | A one-line run summary (site, score change, counts) | Slack, if `SLACK_WEBHOOK_URL` is set | after each `report` run |
+| The audit data itself (page scores, titles, metas, AI suggestions) and the ability to start a crawl | whoever can reach the dashboard's port | continuously, if `serve` is exposed beyond localhost |
 
-Nothing else is sent anywhere. There is no telemetry, no update check, and no account. All
-results live in one SQLite file the customer owns.
+Nothing else is sent anywhere. There is no telemetry, no update check, and no per-user account.
+All results live in one SQLite file the customer owns.
+
+**Hosting the dashboard for a client.** `serve` can run on a box the client reaches over the
+network instead of the operator's own laptop. That turns "who can see the audit and start a
+crawl" from "whoever has a terminal on this machine" into "whoever can reach this port", so two
+things follow: set `SEO_SCOUT_DASHBOARD_TOKEN` before exposing it, since that shared token is the
+*only* credential — there are no per-user accounts to create or revoke, and unset means the
+dashboard is completely open to anyone who can reach it — and put the app behind a reverse proxy
+for TLS, since it does not terminate HTTPS itself. `SEO_SCOUT_ALLOWED_DOMAINS` limits which sites
+a client can point the crawl button at, on top of the built-in refusal of loopback, private and
+link-local addresses. None of this replaces normal network hygiene: a token in an unencrypted
+cookie on an unencrypted connection is a token a network path can read.
 
 **Whose OpenAI key.** Use the customer's key when their page content is sensitive or when
 they want the data relationship with OpenAI to be theirs. OpenAI's API terms at the time of

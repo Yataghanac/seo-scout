@@ -174,6 +174,54 @@ Weekly, on Windows (Task Scheduler, run once from an elevated prompt):
 schtasks /Create /SC WEEKLY /D MON /ST 06:00 /TN "SEO Scout" /TR "cmd /c cd /d C:\path\to\seo-scout && uv run seo-scout report https://example.com --max-pages 200 >> reports\cron.log 2>&1"
 ```
 
+## Hosting it for someone else
+
+Everything above assumes you are the only one running commands. `seo-scout serve` can also sit
+on a box a client reaches over the network: paste a URL into the field in the dashboard header,
+press **Crawl**, and the server runs the crawl in the background while the page polls for
+progress (`crawling https://example.com — 12 pages`) and switches to the finished run when it's
+done. No terminal needed on the client's end.
+
+Two settings change once someone else can reach the dashboard, both in `.env`:
+
+- `SEO_SCOUT_DASHBOARD_TOKEN` — set it and every `/api/*` route, reads and the crawl button
+  alike, requires that token in an `HttpOnly`, `SameSite=Strict` cookie a script cannot read even
+  if the page were compromised. `GET /` (the page itself) stays public, since it holds no data
+  and is what lets the browser render the "enter your token" prompt on a `401`. Leave the
+  variable unset and the deployment is fully open, exactly like local use today. Setting a token
+  also switches off `/api/docs` and `/openapi.json`, so a hosted deployment does not publish its
+  own API schema to an unauthenticated caller.
+- `SEO_SCOUT_ALLOWED_DOMAINS` — a comma-separated list of registrable domains this deployment
+  will crawl. Leave it empty and any public site is accepted, still subject to the address check
+  below.
+
+Whatever a client pastes in is a URL this server is about to request, so `POST /api/crawls`
+refuses loopback, private, link-local and reserved addresses (including the
+`169.254.169.254` cloud metadata endpoint), bare hostnames, and `.local`/`.internal` names — for
+the address the host actually resolves to, not just the literal text, and on every redirect hop
+the crawl follows, not only the URL that was pasted. An allowlisted domain that happens to
+resolve into a private range is still refused: the allowlist narrows which public sites may be
+crawled, it is not an exception to the address rules. This check applies to the dashboard's
+`POST /api/crawls` only — `seo-scout crawl` from the CLI is unrestricted, which is what lets
+`dev/fixture_site.py` crawl `127.0.0.1`.
+
+Honest limitations of this feature:
+
+- **DNS rebinding is not defended.** The address check resolves the host once; nothing pins that
+  address through to the request that actually fetches it, so a host that answers safely at
+  check time and differently a moment later would pass. Closing this means threading the
+  resolved address through httpx's connection, which has not been done.
+- **No cancel.** A running crawl cannot be stopped from the dashboard. `--max-pages` and the
+  30-minute wall clock bound how long a mistaken crawl runs.
+- **One crawl at a time**, with no queue — a second `POST /api/crawls` while one is running gets
+  `409`.
+- **One shared token** for the whole deployment: no per-user login, and nothing to revoke for
+  one person without rotating it for everyone. The app does not terminate TLS either; put it
+  behind a reverse proxy if it needs to be reachable over the open internet.
+- **A crawl dies with the server.** If the process is killed mid-crawl, its run row is left
+  `running`; the next `seo-scout serve` start reconciles any such row older than the wall-clock
+  ceiling to `failed` before serving.
+
 ## Development
 
 ```bash
