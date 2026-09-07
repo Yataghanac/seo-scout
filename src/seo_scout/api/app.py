@@ -35,10 +35,20 @@ def create_app(
             conn.close()
         yield
 
+    # FastAPI mounts /api/docs and /openapi.json directly on the app, not through
+    # `router` — so `dependencies=[Depends(token_guard)]` on include_router() below
+    # never runs for them. A hosted deployment (a token configured) must not publish
+    # its own API schema unauthenticated, so both are switched off outright when a
+    # token is set. docs_url=None alone is not enough: it removes the Swagger UI page
+    # but leaves openapi_url still serving the raw schema, so both must be None.
+    # With no token the deployment is local and unauthenticated by design; docs stay
+    # on as a convenience.
+    hosted = token is not None
     app = FastAPI(
         title="SEO Scout",
         version=__version__,
-        docs_url="/api/docs",
+        docs_url=None if hosted else "/api/docs",
+        openapi_url=None if hosted else "/openapi.json",
         redoc_url=None,
         lifespan=lifespan,
     )
