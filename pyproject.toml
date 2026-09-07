@@ -68,6 +68,8 @@ max-args = 6
 "src/seo_scout/cli.py" = ["PLR0913", "PLR0917"]
 # FastAPI maps every query parameter to a parameter the same way.
 "src/seo_scout/api/routes.py" = ["PLR0913", "PLR0917"]
+# The fixture site's page builder has one knob per audit rule, which is the point of it.
+"dev/fixture_site.py" = ["PLR0913"]
 
 [tool.mypy]
 strict = true

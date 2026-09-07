@@ -515,8 +515,8 @@ the crawler's own bookkeeping, and that bookkeeping had never been assembled fro
 responses. Finding a site that happens to serve two chained redirects, a 404 it links to and a
 sitemap entry nothing links to is luck; building one is not.
 
-**Decision: a fixture site, not more mocks.** A ~150-line `http.server` in the scratchpad
-serves one deliberately broken page per rule: a missing title, two h1s, a canonical pointing
+**Decision: a fixture site, not more mocks.** `dev/fixture_site.py`, a 200-line
+`http.server`, serves one deliberately broken page per rule: a missing title, two h1s, a canonical pointing
 off-domain, `X-Robots-Tag: noindex` as a real response header, an image without alt, a page
 linking to a 404, a two-hop 302 chain, a 3 MB page, a 2.5-second response, and an `/orphan`
 listed in `sitemap.xml` that nothing links to. The suite already mocks at the transport layer
@@ -537,3 +537,10 @@ aborted mid-stream. Both were stored as `too_large` with the status the server r
 reads, and both had passed unit tests forever because every fixture used the plural. Fixed
 with the singular, tested from both sides. Nothing else in this pass needed changing, which is
 the result worth recording: the crawler's bookkeeping survived contact with a real server.
+
+**Kept as a tool, not wired into pytest.** The fixture lives in `dev/`, outside the package and
+imported by nothing. Binding a socket in the suite would buy permanent regression cover for all
+of this, but the brief says tests are offline with zero network calls and finish inside fifteen
+seconds, and that invariant is worth more than the cover: it is why the suite can run anywhere,
+in any order, with no ports to collide over. `ruff` lints `dev/` like everything else, with one
+per-file ignore — the page builder takes one keyword per rule, which is the point of it.

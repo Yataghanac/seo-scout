@@ -185,6 +185,20 @@ uv run pytest --cov=seo_scout.audit --cov=seo_scout.ai     # gate: 80%, currentl
 Every crawler test runs against `respx` mocks; the OpenAI client is scripted by a fake and,
 separately, exercised against a mocked HTTPS endpoint. CI runs the same four commands.
 
+`dev/fixture_site.py` is the other half of that: a deliberately broken site served over real
+HTTP, for exercising the layer `respx` replaces — actual sockets, redirect following, a real
+`robots.txt` and sitemap. It is not part of the test suite and nothing imports it.
+
+```bash
+uv run python dev/fixture_site.py                                            # in one shell
+uv run seo-scout crawl http://127.0.0.1:8099/ --no-ai --delay 0 --db fix.db  # in another
+```
+
+One crawl fires 22 of the 25 rules in under three seconds, including the three computed from
+crawl bookkeeping rather than page content — `broken_links`, `orphan_page`, `redirect_chain` —
+and trips the response size cap from both sides: a page declaring 6 MB, and a chunked 6 MB
+response that declares nothing. The other three rules fire on any ordinary site.
+
 On machines with a TLS-intercepting proxy: the CLI trusts the OS certificate store via
 `truststore`, and `uv` needs `UV_SYSTEM_CERTS=1`.
 

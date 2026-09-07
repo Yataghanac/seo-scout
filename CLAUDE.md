@@ -77,11 +77,11 @@ the dashboard, the JSON API and both exports. Reading commands (`serve`, `audit`
 page text now has three guards, one per sink: `ai/sanitize.py` for the model, `esc()` in the
 dashboard for HTML, `api/export.as_text()` for spreadsheet formulas.
 
-All 25 audit rules have now fired on a live crawl, most of them against a throwaway
-`http.server` fixture site (one broken page per rule, plus a two-hop redirect, a 404 target,
-an orphan in the sitemap and two oversize responses). The suite mocks transport with respx;
-that fixture exists to exercise what respx replaces. It is not in the repo — see DECISIONS.md,
-"Every rule, against a real socket".
+All 25 audit rules have fired on a live crawl. `dev/fixture_site.py` serves one broken
+page per rule over real HTTP (plus a two-hop redirect, a 404 target, a sitemap orphan and two
+oversize responses) and fires 22 of them in one crawl; the suite mocks transport with respx,
+and that fixture exercises what respx replaces. Run by hand, never from pytest — tests stay
+offline. See DECISIONS.md, "Every rule, against a real socket".
 
 ## Workflow
 
