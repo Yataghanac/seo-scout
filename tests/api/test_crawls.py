@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,6 +12,8 @@ from fastapi.testclient import TestClient
 
 from seo_scout.api import targets
 from seo_scout.api.app import create_app
+from seo_scout.config import Settings
+from seo_scout.crawl_runner import BackgroundCrawler
 from seo_scout.models import FetchedPage
 from seo_scout.store import db, repo_pages, repo_runs
 
@@ -161,3 +165,41 @@ def test_startup_reconciles_a_run_left_running_by_a_killed_process(tmp_path: Pat
         runs = client.get("/api/runs").json()
     assert runs[0]["status"] == "failed"
     assert runs[0]["error"] is not None and "interrupted" in runs[0]["error"]
+
+
+async def _noop_crawl(url: str, max_pages: int | None) -> None:
+    return None
+
+
+def test_a_real_runner_actually_schedules_the_crawl(tmp_path: Path) -> None:
+    """A FakeRunner cannot catch this: only a real one calls asyncio.create_task."""
+    path = str(tmp_path / "t.db")
+    db.connect(path).close()
+    runner = BackgroundCrawler(Settings(db=path), _crawl=_noop_crawl)
+    client = TestClient(create_app(path, crawl_runner=runner))
+    response = client.post("/api/crawls", json={"url": "https://example.com"})
+    assert response.status_code == 202
+
+
+def test_a_second_post_while_the_real_crawl_is_still_running_is_refused(tmp_path: Path) -> None:
+    """Proves the busy-lock works through the real runner, not just the fake one.
+
+    `release` is a threading.Event rather than an asyncio one: the crawl coroutine below
+    waits on it via `asyncio.to_thread`, so it is genuinely still pending (not merely
+    scheduled) when the second request arrives. It is set before the `with` block exits so
+    TestClient's portal shutdown, which waits for outstanding tasks, does not hang.
+    """
+    path = str(tmp_path / "t.db")
+    db.connect(path).close()
+    release = threading.Event()
+
+    async def _hanging_crawl(url: str, max_pages: int | None) -> None:
+        await asyncio.to_thread(release.wait)
+
+    runner = BackgroundCrawler(Settings(db=path), _crawl=_hanging_crawl)
+    with TestClient(create_app(path, crawl_runner=runner)) as client:
+        first = client.post("/api/crawls", json={"url": "https://example.com"})
+        assert first.status_code == 202
+        second = client.post("/api/crawls", json={"url": "https://example.com"})
+        assert second.status_code == 409
+        release.set()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from collections.abc import Iterator
 from typing import Annotated, Protocol
@@ -60,8 +61,16 @@ def _run_or_404(conn: sqlite3.Connection, run_id: int) -> Run:
 
 
 @router.post("/crawls", status_code=202)
-def start_crawl(body: CrawlRequest, request: Request) -> dict[str, str]:
-    """Accept a crawl. The run id is not returned: the dashboard polls /api/runs for it."""
+async def start_crawl(body: CrawlRequest, request: Request) -> dict[str, str]:
+    """Accept a crawl. The run id is not returned: the dashboard polls /api/runs for it.
+
+    Declared `async def` so this runs on the event loop, not a threadpool worker: the
+    runner's `start()` calls `asyncio.create_task()`, which needs a running loop in the
+    calling thread. The one blocking step, the DNS lookup in `resolve_reason`, is pushed
+    to a worker thread with `asyncio.to_thread` so it cannot freeze the loop for everyone
+    else. `targets.resolve_reason` is looked up as a module attribute at call time (not
+    bound to a local name beforehand) so tests that monkeypatch it still take effect.
+    """
     runner: CrawlRunner | None = request.app.state.crawl_runner
     if runner is None:
         raise HTTPException(status_code=501, detail="this deployment cannot start crawls")
@@ -71,7 +80,8 @@ def start_crawl(body: CrawlRequest, request: Request) -> dict[str, str]:
     allowlist = request.app.state.allowlist
     if reason := targets.check_url(link.url, allowlist):
         raise HTTPException(status_code=400, detail=reason)
-    if reason := targets.resolve_reason(urlsplit(link.url).hostname or ""):
+    host = urlsplit(link.url).hostname or ""
+    if reason := await asyncio.to_thread(targets.resolve_reason, host):
         raise HTTPException(status_code=400, detail=reason)
     if not runner.start(link.url, body.max_pages):
         raise HTTPException(status_code=409, detail="a crawl is already running")
