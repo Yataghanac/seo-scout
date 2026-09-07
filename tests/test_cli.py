@@ -1,3 +1,4 @@
+import re
 from contextlib import closing
 from pathlib import Path
 
@@ -11,6 +12,14 @@ from seo_scout.cli import app
 from seo_scout.store import db, repo_runs
 
 runner = CliRunner()
+
+
+def _message(output: str) -> str:
+    """Typer draws errors in a box that wraps at the terminal width, so a phrase can be
+    split across two framed lines. Drop the frame and the colours and join the lines: the
+    assertion is about the wording, not about how wide the terminal happened to be."""
+    plain = re.sub("\x1b\\[[0-9;]*m", "", output).replace("│", " ")
+    return " ".join(plain.split())
 
 
 def test_version() -> None:
@@ -72,7 +81,7 @@ def test_audit_command_rejects_unknown_run() -> None:
     test_crawl_writes_a_run_to_the_configured_db()  # the database has to exist to be read
     result = runner.invoke(app, ["audit", "42", "--db", "t.db"])
     assert result.exit_code != 0
-    assert "run 42 does not exist" in result.output
+    assert "run 42 does not exist" in _message(result.output)
 
 
 def test_ai_command_without_key_degrades_cleanly() -> None:
@@ -233,7 +242,7 @@ def test_serve_refuses_a_database_that_does_not_exist(
     missing = tmp_path / "typo.db"
     result = runner.invoke(app, ["serve", "--db", str(missing)])
     assert result.exit_code != 0
-    assert "does not exist" in result.output
+    assert "does not exist" in _message(result.output)
     assert not missing.exists()
 
 
@@ -242,5 +251,5 @@ def test_reading_commands_never_create_a_database(args: list[str], tmp_path: Pat
     missing = tmp_path / f"{args[0]}.db"
     result = runner.invoke(app, [*args, "--db", str(missing)])
     assert result.exit_code != 0
-    assert "does not exist" in result.output
+    assert "does not exist" in _message(result.output)
     assert not missing.exists()
