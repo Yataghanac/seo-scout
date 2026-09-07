@@ -67,13 +67,15 @@ Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<i
 
 ## Pending
 
-Nothing open. The four review passes of 2026-09-06 and the live-run findings of 2026-09-07
-are fixed and recorded in DECISIONS.md.
+Nothing open. The four review passes of 2026-09-06 and the three live-run findings of
+2026-09-07 are fixed and recorded in DECISIONS.md.
 
 The pipeline has been exercised end to end against live sites on the current code: crawl,
 audit, gpt-4o rewrites, a second run served entirely from the cache, diff, report files and
-the dashboard. Reading commands (`serve`, `audit`, `ai`, `diff`) refuse a `--db` that does
-not exist; only `crawl` and `report` create one.
+the dashboard, the JSON API and both exports. Reading commands (`serve`, `audit`, `ai`,
+`diff`) refuse a `--db` that does not exist; only `crawl` and `report` create one. Untrusted
+page text now has three guards, one per sink: `ai/sanitize.py` for the model, `esc()` in the
+dashboard for HTML, `api/export.as_text()` for spreadsheet formulas.
 
 ## Workflow
 
