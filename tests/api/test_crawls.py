@@ -35,7 +35,7 @@ class FakeRunner:
 @pytest.fixture(autouse=True)
 def _no_dns(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every public host in these tests resolves, publicly. Nothing touches the network."""
-    targets.resolve_reason.cache_clear()
+    targets._resolve_reason_cached.cache_clear()
     monkeypatch.setattr(targets, "resolve_reason", lambda host: None)
 
 

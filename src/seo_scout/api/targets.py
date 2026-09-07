@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import time
 from collections.abc import Sequence
 from functools import lru_cache
 from urllib.parse import urlsplit
@@ -17,6 +18,13 @@ from urllib.parse import urlsplit
 from seo_scout.urls import registrable_domain
 
 _LOCAL_SUFFIXES = (".local", ".localhost", ".internal", ".home.arpa")
+# resolve_reason is cached per host so a crawl (which asks it about the same host many
+# times) pays for one DNS lookup, not one per link. An unbounded lru_cache turns that into
+# a standing bypass: a host that resolves publicly exactly once, ever, is exempt from the
+# address check for the rest of the process's life. Bucketing the cache key by a coarse
+# time window forces re-resolution at least this often, which is what "one lookup per host
+# per crawl" actually needs (a crawl finishes in well under this window).
+_RESOLVE_CACHE_SECONDS = 60
 
 
 def blocked_ip(value: str) -> str | None:
@@ -78,8 +86,8 @@ def check_url(url: str, allowlist: Sequence[str] = ()) -> str | None:
 
 
 @lru_cache(maxsize=512)
-def resolve_reason(host: str) -> str | None:
-    """A refusal reason if any address `host` resolves to is internal, else None.
+def _resolve_reason_cached(host: str, epoch: int) -> str | None:
+    """The real lookup, keyed by host and a coarse time bucket (see `resolve_reason`).
 
     Every address is checked, not just the first: a host can publish one public and one
     private record. A host that does not resolve is refused rather than left to the crawler.
@@ -92,6 +100,17 @@ def resolve_reason(host: str) -> str | None:
         if reason := blocked_ip(str(info[4][0])):
             return reason
     return None
+
+
+def resolve_reason(host: str) -> str | None:
+    """A refusal reason if any address `host` resolves to is internal, else None.
+
+    Cached, but only for `_RESOLVE_CACHE_SECONDS` at a time: see the module comment on why
+    an unbounded cache would be worse than the DNS-rebinding gap this deployment already
+    accepts.
+    """
+    epoch = int(time.monotonic() // _RESOLVE_CACHE_SECONDS)
+    return _resolve_reason_cached(host, epoch)
 
 
 def ok(url: str, allowlist: Sequence[str] = ()) -> bool:
