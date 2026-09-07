@@ -67,7 +67,7 @@ Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<i
 
 ## Pending
 
-Nothing open. The four review passes of 2026-09-06 and the five live-run findings of
+Nothing open. The four review passes of 2026-09-06 and the six live-run findings of
 2026-09-07 are fixed and recorded in DECISIONS.md.
 
 The pipeline has been exercised end to end against live sites on the current code: crawl,
@@ -82,6 +82,11 @@ page per rule over real HTTP (plus a two-hop redirect, a 404 target, a sitemap o
 oversize responses) and fires 22 of them in one crawl; the suite mocks transport with respx,
 and that fixture exercises what respx replaces. Run by hand, never from pytest — tests stay
 offline. See DECISIONS.md, "Every rule, against a real socket".
+
+The three guards have been exercised for real: `--max-cost` refuses the first call and spends
+$0.0000 when the cap is below the estimate, `report` posts to Slack once (never on a baseline
+run) and exits 0 even when the webhook is unreachable, and `init` refuses to overwrite an
+existing `.env`.
 
 ## Workflow
 

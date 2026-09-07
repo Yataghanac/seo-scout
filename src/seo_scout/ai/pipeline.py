@@ -253,8 +253,11 @@ def _warning(ctx: _Ctx) -> str | None:
     if ctx.unavailable_reason:
         return f"AI unavailable, deterministic results only: {ctx.unavailable_reason}"
     if ctx.report.budget_exhausted:
+        # Four decimals like every other cost in the codebase: `--max-cost 0.001` is a real
+        # cap, and rounding it to "$0.00" reads as no budget rather than a tenth of a cent.
+        noun = "page" if ctx.report.skipped == 1 else "pages"
         return (
-            f"AI budget of ${ctx.budget.max_usd:.2f} exhausted after ${ctx.budget.spent:.4f}; "
-            f"{ctx.report.skipped} pages skipped"
+            f"AI budget of ${ctx.budget.max_usd:.4f} exhausted after ${ctx.budget.spent:.4f}; "
+            f"{ctx.report.skipped} {noun} skipped"
         )
     return None

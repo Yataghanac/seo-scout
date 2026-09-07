@@ -544,3 +544,36 @@ of this, but the brief says tests are offline with zero network calls and finish
 seconds, and that invariant is worth more than the cover: it is why the suite can run anywhere,
 in any order, with no ports to collide over. `ruff` lints `dev/` like everything else, with one
 per-file ignore — the page builder takes one keyword per rule, which is the point of it.
+
+## Post-launch — The three guards, exercised with a real key
+
+**Trigger.** Three surfaces had never run end to end: the AI spend cap with a real key in the
+environment, the Slack webhook (the machine that ran every earlier test had none configured),
+and `init`. The spend cap is the one that matters — it is the only thing standing between a
+mistyped `--max-pages` and a bill — and it had only ever been exercised against a fake
+completer.
+
+**It holds.** `--max-cost 0.001` against a ten-page crawl made **zero** API calls and spent
+**$0.0000**: the pre-flight tiktoken estimate is compared to the remaining budget before the
+request is built, so the first call is refused rather than the last one regretted. Each page
+recorded why, in cents it can prove: `budget: $0.0039 needed, $0.0010 left`. Raising the cap
+to $0.004 let exactly two calls through at $0.0033, so the guard permits spending up to the
+cap rather than shying away from it.
+
+**Decision: costs are printed to four decimals everywhere, including the cap.** The run-level
+warning read `AI budget of $0.00 exhausted after $0.0000`, because that one line formatted the
+cap with `:.2f` while every other cost in the codebase uses `:.4f`. A user who set a tenth of
+a cent would be told their budget was zero — which reads as a broken config rather than a
+working guard, and sends them looking in the wrong place. The same line said "1 pages skipped".
+Both fixed; the plural case already worked, and is now pinned by a test.
+
+**Slack, and the promise around it.** `report` posts once, on the second run and not on the
+baseline run that has nothing to diff, with the right content type and a message carrying real
+numbers. Pointed at a dead port it logs `slack post failed`, prints `slack: failed (see logs)`,
+writes its report files anyway and exits 0. That is the documented contract for a command
+"built for schedulers", and it is worth having actually watched it happen: a notifier that can
+fail the job it reports on is worse than no notifier.
+
+**`init` keeps its promise too.** Run twice, the second run refuses: `.env already exists`. A
+real key placed in that file survived, which is the only behaviour that matters for a command
+whose whole job is to not destroy credentials.

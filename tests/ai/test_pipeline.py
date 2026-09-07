@@ -227,6 +227,25 @@ async def test_budget_aborts_before_exceeding_max_cost(conn: sqlite3.Connection)
     assert statuses == ["ok", "skipped", "skipped"]
 
 
+async def test_a_sub_cent_budget_is_not_reported_as_zero(conn: sqlite3.Connection) -> None:
+    """`--max-cost 0.001` is a real cap; "budget of $0.00" reads as no budget at all."""
+    run_id = seed(conn, {"https://e.com/a": html(title="Page a")})
+    fake = FakeCompleter([completion(GOOD_TITLE, GOOD_META)])
+    report = await run(conn, run_id, fake, max_cost_usd=0.001, ai_concurrency=1)
+    assert report.budget_exhausted is True
+    assert report.warning is not None
+    assert "$0.0010" in report.warning
+    assert "1 page skipped" in report.warning
+
+
+async def test_several_skipped_pages_stay_plural(conn: sqlite3.Connection) -> None:
+    pages = {f"https://e.com/{i}": html(title=f"Page {i}") for i in range(2)}
+    run_id = seed(conn, pages)
+    fake = FakeCompleter([completion(GOOD_TITLE, GOOD_META)] * 2)
+    report = await run(conn, run_id, fake, max_cost_usd=0.001, ai_concurrency=1)
+    assert report.warning is not None and "2 pages skipped" in report.warning
+
+
 async def test_api_outage_degrades_without_partial_writes(conn: sqlite3.Connection) -> None:
     pages = {f"https://e.com/{i}": html(title=f"Page {i}") for i in range(3)}
     run_id = seed(conn, pages)
