@@ -41,7 +41,7 @@
   h1 { font: 700 30px/1 var(--serif); margin: 0; letter-spacing: -0.01em; }
   h1 small { font: 500 12px var(--mono); color: var(--faint); margin-left: 8px; letter-spacing: .08em; text-transform: uppercase; }
   .spacer { flex: 1; }
-  select, input[type=search], input[type=url], button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
+  select, input[type=search], input[type=url], input[type=password], button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
   select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   button:disabled { opacity: .5; cursor: default; }
   .exports a { margin-left: 12px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
@@ -49,6 +49,11 @@
   .crawlbar input { width: 220px; }
   .crawl-msg { font-size: 12px; color: var(--muted); }
   .crawl-msg.err { color: var(--critical); }
+  .signin { max-width: 420px; margin: 40px auto; text-align: center; }
+  .signin p { color: var(--muted); }
+  .signin form { display: flex; gap: 8px; justify-content: center; }
+  .signin input { flex: 1; }
+  .signin .crawl-msg { margin-top: 10px; font-size: 13px; }
   main { padding: 18px 32px 60px; display: grid; gap: 18px; max-width: 1500px; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
   .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; animation: rise .5s ease both; }
@@ -131,6 +136,15 @@
   </span>
 </header>
 <main>
+  <section class="panel signin" id="signin" hidden>
+    <h2>Sign in required</h2>
+    <p>This dashboard is protected by a token. Enter it to continue.</p>
+    <form id="signin-form" autocomplete="off">
+      <input id="signin-token" type="password" placeholder="token" autocomplete="off">
+      <button type="submit">Sign in</button>
+    </form>
+    <p class="crawl-msg err" id="signin-msg" hidden></p>
+  </section>
   <div id="notice" class="warn" hidden></div>
   <section class="tiles" id="tiles"></section>
   <div id="help" class="help" hidden><span><b>How to read this.</b> The score is a triage order, not a grade. Fix the pages under <i>Start here</i> first, then work down the table. Coloured counts are critical / warning / notice issues; open a page for the fix and, when a rewrite was validated, a title and meta you can copy.</span><button id="help-x">got it</button></div>
@@ -266,25 +280,53 @@ async function startCrawl() {
   await pollCrawl();
 }
 
-function promptLogin() {
-  const token = window.prompt("This dashboard requires a token. Enter it to sign in:");
-  if (token === null || token === "") {
-    $("#notice").hidden = false;
-    $("#notice").textContent = "Sign-in required. Reload the page to try again.";
+function showSignIn() {
+  stopPolling();
+  // Some sections set an explicit CSS `display`, which beats the `hidden` attribute's
+  // UA-level `display:none` at equal specificity — so hide those via inline style instead.
+  for (const el of document.querySelectorAll("main > *")) { if (el.id !== "signin") el.style.display = "none"; }
+  $("#signin").hidden = false;
+  $("#signin-token").focus();
+}
+
+function showSignInError(text) {
+  const box = $("#signin-msg");
+  box.hidden = false;
+  box.textContent = text;
+  const input = $("#signin-token");
+  input.focus();
+  input.select();
+}
+
+async function signIn(e) {
+  e.preventDefault();
+  const btn = $("#signin-form button"), input = $("#signin-token");
+  const token = input.value;
+  if (!token) { input.focus(); return; }
+  btn.disabled = true;
+  $("#signin-msg").hidden = true;
+  let r;
+  try {
+    r = await fetch("/api/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+  } catch (e2) {
+    showSignInError(`Could not reach the server: ${e2.message}`);
+    btn.disabled = false;
     return;
   }
-  fetch("/api/login", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token }),
-  }).then((r) => {
-    if (r.ok) { location.reload(); return; }
-    $("#notice").hidden = false;
-    $("#notice").textContent = "That token was not accepted.";
-  }).catch((e) => {
-    $("#notice").hidden = false;
-    $("#notice").textContent = `Could not sign in: ${e.message}`;
-  });
+  if (!r.ok) { showSignInError("That token was not accepted."); btn.disabled = false; return; }
+  // Confirm the new session actually works before reloading, so a login that
+  // succeeded but still can't reach the API doesn't reload into the same wall.
+  try {
+    await api("/api/runs");
+    location.reload();
+  } catch (e2) {
+    showSignInError(`Signed in, but the dashboard still could not load: ${e2.message}`);
+    btn.disabled = false;
+  }
 }
 
 async function loadRun(id) {
@@ -439,8 +481,9 @@ $("#next").onclick = () => { state.page++; renderTable(); };
 for (const th of document.querySelectorAll("th[data-k]")) th.onclick = () => { const k = th.dataset.k; state.order = state.sort === k && state.order === "asc" ? "desc" : "asc"; state.sort = k; state.page = 1; renderTable(); };
 $("#crawl-go").onclick = () => { startCrawl(); };
 $("#crawl-url").addEventListener("keydown", (e) => { if (e.key === "Enter") startCrawl(); });
+$("#signin-form").addEventListener("submit", signIn);
 init().catch((e) => {
-  if (e.status === 401) { promptLogin(); return; }
+  if (e.status === 401) { showSignIn(); return; }
   $("#notice").hidden = false; $("#notice").textContent = `Could not load data: ${e.message}`;
 });
 </script>
