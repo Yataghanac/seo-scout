@@ -739,3 +739,66 @@ working, and a `Secure` cookie is never sent back over plain HTTP at all. The fi
 request: `secure=True` when `request.url.scheme == "https"` or the request carries
 `x-forwarded-proto: https` (the header a TLS-terminating proxy sets), so a direct HTTPS
 deployment and a proxied one both get the attribute while local HTTP is unchanged.
+
+## Post-launch — Closing the DNS-rebinding gap the README disclosed
+
+**Trigger.** The previous entry's fix bounded the address check's DNS cache to sixty seconds but
+left the underlying gap exactly as it was: the check and the connection are two independent
+lookups, so a host an attacker controls the DNS for can still answer safely at check time and
+differently a moment later, at any point after the check, not only in the narrow window the
+cache bound. The README said so outright. Closing it for real means the connection itself must
+use the address that was checked — there is no way to make two separate resolutions agree.
+
+**Decision: pin at the transport, not the client.** `httpx.AsyncHTTPTransport` is the layer that
+turns a request into an httpcore call, and httpcore 1.0.9 accepts an `sni_hostname` extension
+that keeps TLS validation and the `Host` header on the original name even when the request's
+`url.host` is rewritten to a literal address — proven against a real HTTPS site before writing
+any test. `crawler/pinning.py` (new) is a small `AsyncHTTPTransport` subclass,
+`PinningTransport`, that resolves a request's host itself with
+`asyncio.get_running_loop().getaddrinfo` (off the event loop, since the API runs crawls
+in-process and a slow lookup must not freeze it for other requests — the same reasoning behind
+moving `resolve_reason` to `asyncio.to_thread` in the crawl-button entry), checks every address
+that resolution returns against an injected `blocked` predicate, and rewrites the request to
+connect to whichever address it just checked. A URL whose host is already an IP literal is
+checked the same way but never re-resolved, since there is no name behind it to look up.
+
+**Decision: `blocked` is injected, not imported.** `crawler/` may not import `api/`
+(CLAUDE.md's layering rule), so `PinningTransport` takes `blocked: Callable[[str], str | None]
+| None` and knows nothing about `api.targets.blocked_ip` — the same seam `Crawler.target_ok`
+already uses for the same reason. `crawl_runner.BackgroundCrawler._real_crawl` is the one place
+that wires the two together, passing `blocked=targets.blocked_ip` into `build_client`. A test
+asserts `grep -rn "seo_scout.api" src/seo_scout/crawler/` stays empty.
+
+**Decision: `blocked=None` makes the transport a no-op, so the CLI is untouched by construction.**
+`build_client(settings)` — what `cli.py`'s `_crawl` calls — passes no `blocked`, and
+`PinningTransport.handle_async_request` checks that first and delegates straight to `super()`
+when it is `None`, before doing anything else: no resolution, no rewrite, the request goes
+through exactly as an unmodified `AsyncHTTPTransport` would send it. That is what keeps
+`seo-scout crawl http://127.0.0.1:8099/` — and `dev/fixture_site.py`, which depends on it —
+working unchanged; a fixture-site crawl still completes needing no code path change at all,
+which is a stronger guarantee than a test asserting the two behave the same.
+
+**Found while wiring this up: `build_client`'s own docstring was already wrong.** It claimed to
+build a client "for the crawler and AI calls alike," but `ai.client.make_completer` never
+receives it — it builds its own `AsyncOpenAI` with `http_client=None`, so the SDK owns its own
+transport entirely. The two were never shared in the code that exists today, whatever the
+docstring said. That turned out to be convenient: it means pinning the crawler's client cannot
+affect an OpenAI call, because there is no shared object for it to affect. The docstring is
+corrected rather than left to keep misleading the next reader.
+
+**Verification beyond pytest.** respx mocks at the transport layer, which is the thing being
+replaced here, so respx-based crawler tests cannot exercise `PinningTransport` at all — the new
+`tests/crawler/test_pinning.py` stubs `httpx.AsyncHTTPTransport.handle_async_request` (what
+`super()` calls) directly instead, and separately proves the refused case never reaches it. Real
+sockets were also exercised by hand: a pinned client against a real public HTTPS site completed
+with certificate validation intact, the same pinned client's request to `127.0.0.1` was refused
+by the transport itself, and an unpinned client (the CLI's own `build_client(settings)`, no
+`blocked` argument) reached that same loopback address exactly as it always has.
+
+**What is still not true.** The pre-flight check in `POST /api/crawls` and the transport's own
+resolution remain two separate lookups that can, in principle, disagree — nothing merges them
+into one. What changed is which one the connection actually obeys: it is always the transport's,
+which checks every address a fresh resolution returns immediately before connecting to it, so a
+host that rebinds between the two lookups is still refused. The README's "Honest limitations"
+entry is rewritten to say exactly this instead of the old, now-incorrect claim that no pinning
+existed at all.
