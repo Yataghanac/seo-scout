@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterator
-from typing import Annotated
+from typing import Annotated, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -34,6 +34,13 @@ def get_conn(request: Request) -> Iterator[sqlite3.Connection]:
 
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
+
+
+class CrawlRunner(Protocol):
+    """What the API needs from whoever can crawl. `api` never imports `crawler`."""
+
+    def start(self, url: str, max_pages: int | None) -> bool:
+        """Begin a crawl in the background. False when one is already running."""
 
 
 def _run_or_404(conn: sqlite3.Connection, run_id: int) -> Run:
