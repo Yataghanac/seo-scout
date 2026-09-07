@@ -41,9 +41,14 @@
   h1 { font: 700 30px/1 var(--serif); margin: 0; letter-spacing: -0.01em; }
   h1 small { font: 500 12px var(--mono); color: var(--faint); margin-left: 8px; letter-spacing: .08em; text-transform: uppercase; }
   .spacer { flex: 1; }
-  select, input[type=search], button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
+  select, input[type=search], input[type=url], button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
   select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button:disabled { opacity: .5; cursor: default; }
   .exports a { margin-left: 12px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+  .crawlbar { display: flex; gap: 8px; align-items: center; }
+  .crawlbar input { width: 220px; }
+  .crawl-msg { font-size: 12px; color: var(--muted); }
+  .crawl-msg.err { color: var(--critical); }
   main { padding: 18px 32px 60px; display: grid; gap: 18px; max-width: 1500px; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
   .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; animation: rise .5s ease both; }
@@ -115,6 +120,11 @@
 <header>
   <h1>SEO Scout<small>crawl · audit · rewrite</small></h1>
   <label>run <select id="run"></select></label>
+  <span class="crawlbar">
+    <input id="crawl-url" type="url" placeholder="https://example.com to crawl" autocomplete="off">
+    <button id="crawl-go">Crawl</button>
+    <span class="crawl-msg" id="crawl-msg"></span>
+  </span>
   <span class="spacer"></span>
   <span class="exports">
     <a id="csv" href="#">CSV</a><a id="json" href="#">JSON</a><a href="/api/docs">API</a>
@@ -156,18 +166,29 @@ const params = new URLSearchParams(location.search);
 if (params.get("theme")) document.documentElement.dataset.theme = params.get("theme");
 if (params.has("still")) document.documentElement.dataset.still = "1";
 const state = { runId: null, summary: null, pages: [], sort: "score", order: "asc", page: 1, size: Number(params.get("size")) || 50, selected: null, charts: {} };
+let crawlPoll = null;
 
-async function api(path) { const r = await fetch(path); if (!r.ok) throw new Error(`${path}: ${r.status}`); return r.json(); }
+async function api(path) {
+  const r = await fetch(path);
+  if (!r.ok) { const err = new Error(`${path}: ${r.status}`); err.status = r.status; throw err; }
+  return r.json();
+}
 
-async function init() {
-  const runs = await api("/api/runs");
+function populateRunSelect(runs) {
   const sel = $("#run");
-  if (!runs.length) { $("#notice").hidden = false; $("#notice").textContent = "No runs yet. Run: seo-scout crawl https://example.com --max-pages 50"; return; }
+  sel.innerHTML = "";
   for (const r of runs) {
     const o = document.createElement("option");
     o.value = r.id; o.textContent = `#${r.id} · ${r.start_url} · ${r.pages} pages · ${r.status}`;
     sel.appendChild(o);
   }
+}
+
+async function init() {
+  const runs = await api("/api/runs");
+  const sel = $("#run");
+  if (!runs.length) { $("#notice").hidden = false; $("#notice").textContent = "No runs yet. Run: seo-scout crawl https://example.com --max-pages 50"; return; }
+  populateRunSelect(runs);
   sel.onchange = () => loadRun(Number(sel.value));
   renderHelp();
   const wanted = Number(params.get("run")) || runs[0].id;
@@ -175,6 +196,95 @@ async function init() {
   await loadRun(wanted);
   const pick = params.get("page");
   if (pick) showDetail(pick === "first" ? visiblePages()[0]?.url : pick);
+}
+
+async function refreshAfterCrawl() {
+  const runs = await api("/api/runs");
+  if (!runs.length) return;
+  populateRunSelect(runs);
+  $("#run").value = runs[0].id;
+  await loadRun(runs[0].id);
+}
+
+function setCrawlMsg(text, isErr) {
+  const el = $("#crawl-msg");
+  el.innerHTML = esc(text);
+  el.classList.toggle("err", !!isErr);
+}
+
+function stopPolling() {
+  if (crawlPoll) { clearTimeout(crawlPoll); crawlPoll = null; }
+}
+
+async function pollCrawl() {
+  try {
+    const runs = await api("/api/runs");
+    const running = runs.find((r) => r.status === "running");
+    if (running) {
+      setCrawlMsg(`crawling ${running.start_url} — ${running.pages} pages`);
+      crawlPoll = setTimeout(pollCrawl, 2000);
+      return;
+    }
+  } catch (e) {
+    setCrawlMsg(`lost track of the crawl: ${e.message}`, true);
+    $("#crawl-go").disabled = false;
+    crawlPoll = null;
+    return;
+  }
+  setCrawlMsg("");
+  $("#crawl-go").disabled = false;
+  crawlPoll = null;
+  try { await refreshAfterCrawl(); } catch (e) { setCrawlMsg(`crawl finished, but the dashboard could not refresh: ${e.message}`, true); }
+}
+
+async function startCrawl() {
+  const btn = $("#crawl-go"), input = $("#crawl-url");
+  if (btn.disabled) return;
+  const url = input.value.trim();
+  if (!url) return;
+  stopPolling();
+  btn.disabled = true;
+  setCrawlMsg("starting…");
+  let started = false;
+  try {
+    const r = await fetch("/api/crawls", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url, max_pages: null }),
+    });
+    if (r.ok) {
+      started = true;
+    } else {
+      let detail = `${r.status} ${r.statusText}`;
+      try { const body = await r.json(); if (body && body.detail) detail = body.detail; } catch (e) {}
+      setCrawlMsg(detail, true);
+    }
+  } catch (e) {
+    setCrawlMsg(`could not reach the server: ${e.message}`, true);
+  }
+  if (!started) { btn.disabled = false; return; }
+  await pollCrawl();
+}
+
+function promptLogin() {
+  const token = window.prompt("This dashboard requires a token. Enter it to sign in:");
+  if (token === null || token === "") {
+    $("#notice").hidden = false;
+    $("#notice").textContent = "Sign-in required. Reload the page to try again.";
+    return;
+  }
+  fetch("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+  }).then((r) => {
+    if (r.ok) { location.reload(); return; }
+    $("#notice").hidden = false;
+    $("#notice").textContent = "That token was not accepted.";
+  }).catch((e) => {
+    $("#notice").hidden = false;
+    $("#notice").textContent = `Could not sign in: ${e.message}`;
+  });
 }
 
 async function loadRun(id) {
@@ -327,7 +437,12 @@ $("#q").oninput = () => { state.page = 1; renderTable(); };
 $("#prev").onclick = () => { state.page--; renderTable(); };
 $("#next").onclick = () => { state.page++; renderTable(); };
 for (const th of document.querySelectorAll("th[data-k]")) th.onclick = () => { const k = th.dataset.k; state.order = state.sort === k && state.order === "asc" ? "desc" : "asc"; state.sort = k; state.page = 1; renderTable(); };
-init().catch((e) => { $("#notice").hidden = false; $("#notice").textContent = `Could not load data: ${e.message}`; });
+$("#crawl-go").onclick = () => { startCrawl(); };
+$("#crawl-url").addEventListener("keydown", (e) => { if (e.key === "Enter") startCrawl(); });
+init().catch((e) => {
+  if (e.status === 401) { promptLogin(); return; }
+  $("#notice").hidden = false; $("#notice").textContent = `Could not load data: ${e.message}`;
+});
 </script>
 </body>
 </html>
