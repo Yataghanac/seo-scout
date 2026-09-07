@@ -73,7 +73,13 @@ Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<i
 
 ## Pending
 
-Nothing open. The four review passes of 2026-09-06, the six live-run findings of 2026-09-07,
+One thing unverified, worth thirty seconds in a real browser: pressing **Enter** to submit
+the dashboard's sign-in field and the crawl URL field. Both are implemented — sign-in is a
+real `<form>` with a `submit` handler, the crawl bar has an explicit Enter `keydown`
+listener — but synthetic key events in browser automation did not trigger either, so it was
+never confirmed by hand. Clicking the buttons is verified and works.
+
+Otherwise nothing open. The four review passes of 2026-09-06, the six live-run findings of 2026-09-07,
 and the dashboard-crawl feature (`POST /api/crawls`, the SSRF gate in `api/targets.py`,
 shared-token auth, startup reconciliation) are fixed and recorded in DECISIONS.md.
 
