@@ -23,7 +23,7 @@ from seo_scout.api.schemas import (
 from seo_scout.audit.registry import RULES
 from seo_scout.audit.service import summarize_run
 from seo_scout.models import Run, Severity
-from seo_scout.store import db, repo_runs
+from seo_scout.store import db, repo_pages, repo_runs
 from seo_scout.urls import link_pair
 
 router = APIRouter(prefix="/api")
@@ -80,7 +80,13 @@ def start_crawl(body: CrawlRequest, request: Request) -> dict[str, str]:
 
 @router.get("/runs")
 def list_runs(conn: Conn) -> list[Run]:
-    return repo_runs.list_runs(conn)
+    """A finished run reports its stored page count; a running one reports what it has so far."""
+    return [
+        run.model_copy(update={"pages": repo_pages.count_pages(conn, run.id)})
+        if run.status == "running"
+        else run
+        for run in repo_runs.list_runs(conn)
+    ]
 
 
 @router.get("/runs/{run_id}/summary")

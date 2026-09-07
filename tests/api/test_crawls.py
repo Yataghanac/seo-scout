@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,8 @@ from fastapi.testclient import TestClient
 
 from seo_scout.api import targets
 from seo_scout.api.app import create_app
-from seo_scout.store import db
+from seo_scout.models import FetchedPage
+from seo_scout.store import db, repo_pages, repo_runs
 
 
 class FakeRunner:
@@ -105,3 +107,41 @@ def test_a_host_that_does_not_resolve_is_refused(
     assert response.status_code == 400
     assert "does not resolve" in response.json()["detail"]
     assert runner.started == []
+
+
+def test_a_running_run_reports_pages_fetched_so_far(tmp_path: Path) -> None:
+    """`runs.pages` is only written at the end; mid-crawl the dashboard needs the live count."""
+    path = str(tmp_path / "t.db")
+    conn = db.connect(path)
+    run_id = repo_runs.create_run(conn, "https://e.com/", {"max_pages": 10})
+    for n in range(3):
+        repo_pages.insert_page(
+            conn,
+            run_id,
+            FetchedPage(
+                url=f"https://e.com/{n}",
+                final_url=f"https://e.com/{n}",
+                status=200,
+                depth=0,
+                content_type="text/html",
+                bytes=10,
+                elapsed_ms=1,
+                fetched_at=datetime.now(UTC),
+                html="<p>x</p>",
+            ),
+        )
+    conn.close()
+    runs = TestClient(create_app(path)).get("/api/runs").json()
+    assert runs[0]["status"] == "running"
+    assert runs[0]["pages"] == 3
+
+
+def test_a_finished_run_reports_its_stored_count(tmp_path: Path) -> None:
+    """Only running rows are overlaid; a finished run's stored total must be left alone."""
+    path = str(tmp_path / "t.db")
+    conn = db.connect(path)
+    run_id = repo_runs.create_run(conn, "https://e.com/", {"max_pages": 10})
+    repo_runs.finish_run(conn, run_id, "complete", pages=7)
+    conn.close()
+    runs = TestClient(create_app(path)).get("/api/runs").json()
+    assert runs[0]["pages"] == 7
