@@ -48,6 +48,25 @@ def test_the_login_cookie_is_not_readable_by_javascript(tmp_path: Path) -> None:
     assert "httponly" in response.headers["set-cookie"].lower()
 
 
+def test_the_login_cookie_is_not_marked_secure_over_plain_http(tmp_path: Path) -> None:
+    """Local, unproxied use is plain HTTP; a `Secure` cookie would never be sent back, which
+    would silently break the token for exactly the deployment it must keep working for."""
+    client = _client(tmp_path, "s3cret")
+    response = client.post("/api/login", json={"token": "s3cret"})
+    assert "secure" not in response.headers["set-cookie"].lower()
+
+
+def test_the_login_cookie_is_marked_secure_behind_a_tls_terminating_proxy(tmp_path: Path) -> None:
+    """FINDING 3: the README tells operators to put a hosted deployment behind a proxy that
+    terminates TLS and forwards plain HTTP, so the request scheme alone reads `http` even
+    though the client used `https`; `X-Forwarded-Proto` is how the proxy says so."""
+    client = _client(tmp_path, "s3cret")
+    response = client.post(
+        "/api/login", json={"token": "s3cret"}, headers={"x-forwarded-proto": "https"}
+    )
+    assert "secure" in response.headers["set-cookie"].lower()
+
+
 def test_the_docs_page_is_gone_when_a_token_is_configured(tmp_path: Path) -> None:
     """FastAPI mounts /api/docs on the app itself, not through the guarded router, so it
     must be disabled outright rather than relying on the router's dependency to reach it.
