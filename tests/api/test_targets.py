@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import socket
+from typing import Any
+
 import pytest
 
-from seo_scout.api.targets import blocked_ip, check_url
+from seo_scout.api import targets
+from seo_scout.api.targets import blocked_ip, check_url, ok
 
 
 @pytest.mark.parametrize(
@@ -65,3 +69,83 @@ def test_an_allowlist_covers_subdomains_of_the_listed_domain() -> None:
 def test_an_allowlist_does_not_widen_the_address_rules() -> None:
     """The allowlist says which sites, never which addresses may be reached."""
     assert check_url("http://127.0.0.1/", ["127.0.0.1"]) is not None
+
+
+class _FakeResolver:
+    """Stands in for `socket.getaddrinfo`: never touches the network.
+
+    Returns 5-tuples shaped like the real call `(family, type, proto, canonname, sockaddr)`
+    with the address at `info[4][0]`, which is what `resolve_reason` reads. Counts calls so
+    tests can prove the `lru_cache` (or `ok`'s short-circuit) actually did its job.
+    """
+
+    def __init__(self, *addresses: str, error: OSError | None = None) -> None:
+        self.addresses = addresses
+        self.error = error
+        self.calls = 0
+
+    def __call__(self, *_args: Any, **_kwargs: Any) -> list[tuple[int, int, int, str, Any]]:
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (addr, 0)) for addr in self.addresses]
+
+
+def test_a_host_with_any_internal_address_is_refused_even_with_a_public_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A host can publish both a public and a private record; every address is checked."""
+    targets.resolve_reason.cache_clear()
+    fake = _FakeResolver("93.184.216.34", "10.0.0.5")
+    monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
+    assert targets.resolve_reason("mixed.example") is not None
+
+
+def test_a_purely_public_host_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    targets.resolve_reason.cache_clear()
+    fake = _FakeResolver("93.184.216.34")
+    monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
+    assert targets.resolve_reason("public-only.example") is None
+
+
+def test_a_host_that_does_not_resolve_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    targets.resolve_reason.cache_clear()
+    fake = _FakeResolver(error=socket.gaierror("nodename nor servname provided"))
+    monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
+    reason = targets.resolve_reason("nowhere.example")
+    assert reason is not None and "does not resolve" in reason
+
+
+def test_resolve_reason_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`allowed` runs for every link a crawl enqueues; a DNS lookup per host must run once."""
+    targets.resolve_reason.cache_clear()
+    fake = _FakeResolver("93.184.216.34")
+    monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
+    targets.resolve_reason("cached.example")
+    targets.resolve_reason("cached.example")
+    assert fake.calls == 1
+    info = targets.resolve_reason.cache_info()
+    assert (info.hits, info.misses) == (1, 1)
+
+
+def test_ok_refuses_a_bad_url_without_ever_resolving_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`check_url` is the cheap gate; `ok` must not pay for a DNS lookup it doesn't need."""
+    fake = _FakeResolver("93.184.216.34")  # would make the host look fine, if it ran at all
+    monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
+    assert ok("http://127.0.0.1/") is False
+    assert fake.calls == 0
+
+
+def test_ok_allows_a_public_url_that_resolves_publicly(monkeypatch: pytest.MonkeyPatch) -> None:
+    targets.resolve_reason.cache_clear()
+    fake = _FakeResolver("93.184.216.34")
+    monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
+    assert ok("https://public.example/") is True
+
+
+def test_ok_respects_the_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A public, publicly-resolving host outside the configured allowlist is still refused."""
+    targets.resolve_reason.cache_clear()
+    fake = _FakeResolver("93.184.216.34")
+    monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
+    assert ok("https://outside-allowlist.example/", ["client.com"]) is False
