@@ -53,6 +53,10 @@ packages = ["src/seo_scout"]
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
+# Plans and specs quote fragments in context - a class body, half a function - which are not
+# valid standalone modules and are not meant to be. Ruff formats python blocks inside
+# markdown, so it would rewrite prose that is deliberately partial. Source stays checked.
+extend-exclude = ["docs/superpowers"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "PL", "RUF", "SIM", "ASYNC"]
