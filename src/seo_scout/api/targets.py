@@ -53,25 +53,28 @@ def _hostname_reason(host: str, url: str, allowlist: Sequence[str]) -> str | Non
     return None
 
 
+def _host(url: str) -> str:
+    """The lowercased hostname component of `url`, or "" if it has none."""
+    return (urlsplit(url).hostname or "").strip().lower()
+
+
 def check_url(url: str, allowlist: Sequence[str] = ()) -> str | None:
     """A refusal reason for a URL a client may not ask us to crawl, else None.
 
-    No DNS here: this is the cheap, pure gate. `resolve_reason` does the lookup.
+    No DNS here: this is the cheap, pure gate. `resolve_reason` does the lookup. Scheme is
+    not checked here either: the endpoint calls `urls.link_pair` first, which rejects
+    anything that isn't http(s), so this function alone does not make a URL safe to fetch.
     """
-    host = (urlsplit(url).hostname or "").strip().lower()
+    host = _host(url)
     if not host:
         return "that URL has no host"
     try:
         ipaddress.ip_address(host)
     except ValueError:
-        is_ip = False
-    else:
-        is_ip = True
-    if is_ip:
-        if allowlist:
-            return f"{host} is an address, not one of this deployment's allowed sites"
-        return blocked_ip(host)
-    return _hostname_reason(host, url, allowlist)
+        return _hostname_reason(host, url, allowlist)
+    if allowlist:
+        return f"{host} is an address, not one of this deployment's allowed sites"
+    return blocked_ip(host)
 
 
 @lru_cache(maxsize=512)
@@ -95,5 +98,4 @@ def ok(url: str, allowlist: Sequence[str] = ()) -> bool:
     """The whole gate as one predicate, for composing into the crawler's `allowed` hook."""
     if check_url(url, allowlist) is not None:
         return False
-    host = (urlsplit(url).hostname or "").strip().lower()
-    return resolve_reason(host) is None
+    return resolve_reason(_host(url)) is None
