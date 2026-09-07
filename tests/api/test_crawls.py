@@ -145,3 +145,19 @@ def test_a_finished_run_reports_its_stored_count(tmp_path: Path) -> None:
     conn.close()
     runs = TestClient(create_app(path)).get("/api/runs").json()
     assert runs[0]["pages"] == 7
+
+
+def test_startup_reconciles_a_run_left_running_by_a_killed_process(tmp_path: Path) -> None:
+    """`with TestClient(...)` triggers the lifespan handler; a bare `.get()` would not."""
+    path = str(tmp_path / "t.db")
+    conn = db.connect(path)
+    run_id = repo_runs.create_run(conn, "https://e.com/", {"max_pages": 10})
+    conn.execute(
+        "UPDATE runs SET started_at = ? WHERE id = ?", ("2020-01-01T00:00:00+00:00", run_id)
+    )
+    conn.commit()
+    conn.close()
+    with TestClient(create_app(path)) as client:
+        runs = client.get("/api/runs").json()
+    assert runs[0]["status"] == "failed"
+    assert runs[0]["error"] is not None and "interrupted" in runs[0]["error"]
