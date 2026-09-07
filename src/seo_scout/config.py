@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from seo_scout import __version__
 
@@ -38,6 +40,18 @@ class Settings(BaseSettings):
     # Automation
     slack_webhook_url: str | None = Field(default=None, validation_alias="SLACK_WEBHOOK_URL")
 
+    # Hosted dashboard. Both empty means: no auth, and any public site may be crawled.
+    dashboard_token: str | None = None
+    allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    @field_validator("allowed_domains", mode="before")
+    @classmethod
+    def _split_domains(cls, value: object) -> object:
+        """Accept `a.com, b.com` from the environment; pydantic would want JSON."""
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        return value
+
     @property
     def user_agent(self) -> str:
         major_minor = ".".join(__version__.split(".")[:2])
@@ -45,7 +59,7 @@ class Settings(BaseSettings):
 
     def effective_config_line(self) -> str:
         """One printable line of the effective config with secrets redacted."""
-        secrets = {"openai_api_key", "slack_webhook_url"}
+        secrets = {"openai_api_key", "slack_webhook_url", "dashboard_token"}
         parts = [
             f"{name}={('set' if value else 'unset') if name in secrets else value}"
             for name, value in self.model_dump().items()

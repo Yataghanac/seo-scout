@@ -32,3 +32,23 @@ def test_effective_config_line_redacts_key(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_user_agent_identifies_honestly() -> None:
     assert Settings().user_agent == "SEOScout/0.1 (+https://github.com/Yataghanac/seo-scout)"
+
+
+def test_dashboard_auth_is_off_by_default() -> None:
+    settings = Settings()
+    assert settings.dashboard_token is None
+    assert settings.allowed_domains == []
+
+
+def test_allowed_domains_parses_a_comma_separated_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SEO_SCOUT_ALLOWED_DOMAINS", "client.com, other.co.uk ")
+    assert Settings().allowed_domains == ["client.com", "other.co.uk"]
+
+
+def test_the_token_is_redacted_in_the_effective_config_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SEO_SCOUT_DASHBOARD_TOKEN", "hunter2")
+    line = Settings().effective_config_line()
+    assert "hunter2" not in line
+    assert "dashboard_token=set" in line
