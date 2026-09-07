@@ -120,7 +120,8 @@ def serve(
     typer.echo(f"dashboard: {url}  (db: {settings.db})")
     timer = _open_later(url) if open_browser else None
     try:
-        uvicorn.run(create_app(settings.db), host=host, port=port, log_level="warning")
+        app = create_app(settings.db, wall_clock_seconds=settings.wall_clock_seconds)
+        uvicorn.run(app, host=host, port=port, log_level="warning")
     finally:
         if timer is not None:
             timer.cancel()  # bind failed or Ctrl+C: do not open a tab on someone else's port
