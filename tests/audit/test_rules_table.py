@@ -119,3 +119,35 @@ def test_single_hop_redirect_is_fine() -> None:
     page = load("clean", redirect_chain=[{"url": "https://e.com/a", "status": 301}])
     ctx = build_context([page], inbound={}, sitemap_urls=set(), status_by_url={})
     assert audit_page(page, ctx) == []
+
+
+def _with_images(missing: int, total: int) -> AuditPage:
+    """A clean page carrying `total` images, the first `missing` of them without an alt."""
+    imgs = "".join(
+        f'<img src="/{i}.png">' if i < missing else f'<img src="/{i}.png" alt="x">'
+        for i in range(total)
+    )
+    words = " ".join(f"word{i}" for i in range(320))
+    html = (
+        '<html lang="en"><head><title>A title long enough to satisfy the rule here</title>'
+        '<meta name="description" content="A description written to sit inside the seventy '
+        'to one hundred and sixty character window the audit asks for.">'
+        '<link rel="canonical" href="https://e.com/">'
+        '<meta property="og:title" content="t"><meta property="og:description" content="d">'
+        f"</head><body><h1>H</h1><p>{words}</p>{imgs}</body></html>"
+    )
+    return AuditPage.build(url="https://e.com/", final_url="https://e.com/", html=html)
+
+
+def test_one_image_without_alt_is_reported_in_the_singular() -> None:
+    page = _with_images(missing=1, total=2)
+    ctx = build_context([page], inbound={}, sitemap_urls=set(), status_by_url={})
+    (issue,) = [i for i in audit_page(page, ctx) if i.rule_id == "images_missing_alt"]
+    assert issue.message == "1 of 2 images has no alt attribute"
+
+
+def test_several_images_without_alt_stay_plural() -> None:
+    page = _with_images(missing=2, total=3)
+    ctx = build_context([page], inbound={}, sitemap_urls=set(), status_by_url={})
+    (issue,) = [i for i in audit_page(page, ctx) if i.rule_id == "images_missing_alt"]
+    assert issue.message == "2 of 3 images have no alt attribute"

@@ -91,3 +91,20 @@ def test_unlinked_page_not_in_sitemap_is_not_an_orphan() -> None:
     stray = page("https://e.com/stray")
     ctx = build_context([stray], inbound={}, sitemap_urls=set(), status_by_url={})
     assert "orphan_page" not in {i.rule_id for i in audit_page(stray, ctx)}
+
+
+def test_one_broken_link_is_reported_in_the_singular() -> None:
+    """The message is the report a client reads; "1 broken internal links" is not English."""
+    home = page("https://e.com/", links=("/dead", "/ok"))
+    statuses = {"https://e.com/dead": 404, "https://e.com/ok": 200}
+    ctx = build_context([home], inbound={}, sitemap_urls=set(), status_by_url=statuses)
+    (issue,) = [i for i in audit_page(home, ctx) if i.rule_id == "broken_links"]
+    assert "1 broken internal link:" in issue.message
+
+
+def test_several_broken_links_stay_plural() -> None:
+    home = page("https://e.com/", links=("/dead", "/gone"))
+    statuses = {"https://e.com/dead": 404, "https://e.com/gone": 500}
+    ctx = build_context([home], inbound={}, sitemap_urls=set(), status_by_url=statuses)
+    (issue,) = [i for i in audit_page(home, ctx) if i.rule_id == "broken_links"]
+    assert "2 broken internal links:" in issue.message

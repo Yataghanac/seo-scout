@@ -505,3 +505,35 @@ the 25 real rows of a live run it changed nothing.
 **Not the JSON export.** JSON has no formula interpreter, and a consumer that pastes JSON into
 a spreadsheet has already left the format. Defending one sink is the point; defending every
 hypothetical one would make the data less faithful for no gain.
+
+## Post-launch — Every rule, against a real socket
+
+**Trigger.** Live crawls of real sites had fired 8 of the 25 rules. The other 17 were covered
+by unit fixtures (a test already enforces that every rule id has a case or a dedicated test),
+but the cross-page ones — `broken_links`, `orphan_page`, `redirect_chain` — are computed from
+the crawler's own bookkeeping, and that bookkeeping had never been assembled from real HTTP
+responses. Finding a site that happens to serve two chained redirects, a 404 it links to and a
+sitemap entry nothing links to is luck; building one is not.
+
+**Decision: a fixture site, not more mocks.** A ~150-line `http.server` in the scratchpad
+serves one deliberately broken page per rule: a missing title, two h1s, a canonical pointing
+off-domain, `X-Robots-Tag: noindex` as a real response header, an image without alt, a page
+linking to a 404, a two-hop 302 chain, a 3 MB page, a 2.5-second response, and an `/orphan`
+listed in `sitemap.xml` that nothing links to. The suite already mocks at the transport layer
+with respx; the point of this one is to exercise the layer respx replaces — real sockets, real
+redirect following, a real `robots.txt` and a real sitemap. 22 rules fired in one crawl, and
+with the three the live sites had already produced that is all 25.
+
+**Everything held.** Each message named the right page and the right value, `/missing` was
+recorded at depth 2 behind the page that linked to it and excluded from the audit as a
+non-200, sitemap seeds came in at depth 0, and the redirect row stored both hops with
+`/redirect-end` as its final URL. The response-size cap was the last unexercised transport
+guard and it holds from both sides: a 6 MB page with an honest `content-length` is refused
+before a byte of body is read, and a chunked 6 MB response with no `content-length` at all is
+aborted mid-stream. Both were stored as `too_large` with the status the server really sent.
+
+**Two things did not read well.** `broken_links` said "1 broken internal links" and
+`images_missing_alt` said "1 of 2 images have no alt attribute". Both are the report a client
+reads, and both had passed unit tests forever because every fixture used the plural. Fixed
+with the singular, tested from both sides. Nothing else in this pass needed changing, which is
+the result worth recording: the crawler's bookkeeping survived contact with a real server.

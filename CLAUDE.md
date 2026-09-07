@@ -67,7 +67,7 @@ Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<i
 
 ## Pending
 
-Nothing open. The four review passes of 2026-09-06 and the three live-run findings of
+Nothing open. The four review passes of 2026-09-06 and the five live-run findings of
 2026-09-07 are fixed and recorded in DECISIONS.md.
 
 The pipeline has been exercised end to end against live sites on the current code: crawl,
@@ -76,6 +76,12 @@ the dashboard, the JSON API and both exports. Reading commands (`serve`, `audit`
 `diff`) refuse a `--db` that does not exist; only `crawl` and `report` create one. Untrusted
 page text now has three guards, one per sink: `ai/sanitize.py` for the model, `esc()` in the
 dashboard for HTML, `api/export.as_text()` for spreadsheet formulas.
+
+All 25 audit rules have now fired on a live crawl, most of them against a throwaway
+`http.server` fixture site (one broken page per rule, plus a two-hop redirect, a 404 target,
+an orphan in the sitemap and two oversize responses). The suite mocks transport with respx;
+that fixture exists to exercise what respx replaces. It is not in the repo — see DECISIONS.md,
+"Every rule, against a real socket".
 
 ## Workflow
 

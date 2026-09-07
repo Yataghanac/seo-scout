@@ -14,4 +14,5 @@ def images_missing_alt(page: AuditPage, _ctx: CrawlContext) -> list[str]:
     missing = page.parsed.images_missing_alt
     if missing == 0:
         return []
-    return [f"{missing} of {page.parsed.images_total} images have no alt attribute"]
+    verb = "has" if missing == 1 else "have"
+    return [f"{missing} of {page.parsed.images_total} images {verb} no alt attribute"]

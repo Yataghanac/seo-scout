@@ -18,7 +18,8 @@ def broken_links(page: AuditPage, ctx: CrawlContext) -> list[str]:
     if not broken:
         return []
     shown = ", ".join(broken[:EXAMPLES]) + (" ..." if len(broken) > EXAMPLES else "")
-    return [f"{len(broken)} broken internal links: {shown}"]
+    noun = "link" if len(broken) == 1 else "links"
+    return [f"{len(broken)} broken internal {noun}: {shown}"]
 
 
 @rule(
