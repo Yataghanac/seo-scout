@@ -276,9 +276,15 @@ class Crawler:
             log.debug("skipped by policy", extra={"url": link.key})
 
     async def _discover(self, home: str) -> tuple[RobotsPolicy, Seeds]:
+        """robots.txt first, then sitemaps — gated by the composed policy from the first
+        request onward, so a `Sitemap:` line or a redirect it follows cannot reach a
+        `target_ok`-refused address any more than a page link could (Finding 1)."""
         ua = self._settings.user_agent
         policy = await fetch_robots(self._client, home, ua)
-        seeds = await discover_seeds(self._client, home, policy.sitemaps, user_agent=ua)
+        gate = self._gate(policy)
+        seeds = await discover_seeds(
+            self._client, home, policy.sitemaps, user_agent=ua, allowed=gate
+        )
         return policy, seeds
 
     @staticmethod
