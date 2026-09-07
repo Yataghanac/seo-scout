@@ -626,7 +626,9 @@ predicate the caller may set (default: allow everything, which is what the CLI g
 `Crawler._gate` composes it with `policy.allowed`: `lambda url: policy.allowed(url) and
 self.target_ok(url)`. Both `_enqueue` and `_process` now call that composed callable and never
 `policy.allowed` directly, so a redirect chain is checked exactly as thoroughly as the first
-request, through code already proven correct for robots.
+request, through code already proven correct for robots. *(This covered the frontier —
+`_enqueue`/`_process` — but not robots.txt and sitemap discovery, which ran before the gate
+existed; see the SSRF hardening entry below.)*
 
 **Decision: the allowlist narrows, it never widens.** `SEO_SCOUT_ALLOWED_DOMAINS` restricts a
 deployment to specific registrable domains; it answers "which sites may this deployment audit",
@@ -682,3 +684,58 @@ hanging resolution cannot freeze it for every other request. The regression test
 caught this, `test_a_real_runner_actually_schedules_the_crawl`, uses a real `BackgroundCrawler`
 for exactly that reason: a fake collaborator that never exercises the thing that broke cannot be
 trusted to prove the seam works.
+
+## Post-launch — Closing the SSRF gaps a security review found in the crawl button
+
+**Trigger.** A review of the crawl-button feature above found the target-safety gate was real
+but incomplete: discovery ran outside it entirely, the DNS cache had no time bound, and the
+login cookie lacked `Secure`. All three are in the same feature, so one entry covers them.
+
+**Bug: discovery ran before the composed gate existed, and was not gated at all.**
+`Crawler._crawl` called `self._discover(start_url)` before `state.allowed` (robots.txt composed
+with `target_ok`) was built, so `fetch_robots` and `discover_seeds` never saw `target_ok` —
+and `discover_seeds`'s own sitemap fetcher, `_get_text`, checked nothing at all, not even
+`same_site`. A `Sitemap:` line in a crawled site's own robots.txt was fetched exactly as
+written, so a hostile or compromised site could name `http://169.254.169.254/latest/meta-data/`
+as its sitemap and have this server fetch it — confirmed with a respx-mocked reproduction
+before the fix (the metadata route's `.called` was `True`). `_get_text` also called
+`client.get(url, follow_redirects=True)`, so any redirect a same-site `sitemap.xml` returned
+was followed with no check on the target, same-site or not — a same-site sitemap 302ing to
+`http://127.0.0.1:9999/secret` reached it. The fix: `Crawler._discover` now builds the composed
+gate immediately after `fetch_robots` returns (a policy is required to build one) and passes it
+into `discover_seeds(..., allowed=gate)`; `discover_seeds` defaults `allowed` to permit-all so
+the CLI is unaffected. `_get_text` checks `allowed` before every request it makes, including the
+first, and follows redirects by hand — bounded to three hops, `allowed` re-checked on every
+`Location` — instead of handing `follow_redirects=True` to httpx, since real sitemaps do
+redirect (commonly http to https) and `Fetcher.fetch` cannot be reused here: it enforces an
+HTML content-type and would reject sitemap XML as `non_html`. Three new tests in
+`test_crawler.py` cover the robots-named case, the redirecting-sitemap case, and a permissive-
+default regression guard proving discovery still works for the CLI.
+
+**Bug: the DNS cache had no time bound, so one public resolution exempted a host forever.**
+`targets.resolve_reason` was `@lru_cache(maxsize=512)` with no expiry: once a host resolved
+publicly, that result served every check for the life of the `serve` process, regardless of what
+the host's DNS answered later. The README described this as a timing race ("a host that answers
+safely at check time and differently a moment later"), which understated it — an attacker's
+domain need only resolve publicly once, ever, ahead of an otherwise-unrelated request, to be
+permanently exempt. The fix keeps the `lru_cache` (the DNS lookup itself is still worth caching:
+`allowed()` runs for every link a crawl enqueues) but keys it on `(host, epoch)` where
+`epoch = int(time.monotonic() // 60)`, in a new private `_resolve_reason_cached`; the public
+`resolve_reason(host)` computes the current epoch and delegates. Sixty seconds still gives the
+"one lookup per host per crawl" the cache exists for — a crawl finishes well inside that window
+— while guaranteeing re-resolution at least that often. No new dependency: the stack forbids
+adding one (`cachetools` was the obvious alternative) and a hand-rolled epoch bucket is a few
+lines. The README's "Honest limitations" entry is corrected to describe the real residual risk —
+no IP pinning through to the fetch, not a narrow window — and `test_targets.py` gained a test
+that moves the clock forward a bucket and proves the host is re-resolved, not served from the
+earlier window forever.
+
+**Bug: the login cookie had no `Secure` attribute.** `auth.login` set
+`httponly=True, samesite="strict"` but not `secure`, so on a hosted deployment behind a
+TLS-terminating proxy (which the README tells operators to use) the token could still be sent
+over a plaintext connection if one ever occurred — misconfigured proxy, a stray HTTP listener,
+whatever. It could not simply be hardcoded `True`: local HTTP use with a token must keep
+working, and a `Secure` cookie is never sent back over plain HTTP at all. The fix derives it per
+request: `secure=True` when `request.url.scheme == "https"` or the request carries
+`x-forwarded-proto: https` (the header a TLS-terminating proxy sets), so a direct HTTPS
+deployment and a proxied one both get the attribute while local HTTP is unchanged.
