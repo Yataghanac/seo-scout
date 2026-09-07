@@ -13,8 +13,9 @@ from seo_scout.api.targets import blocked_ip, check_url, ok
 
 @pytest.fixture(autouse=True)
 def _clear_resolve_reason_cache() -> None:
-    """`resolve_reason` is `lru_cache`d; a stale hit from an earlier test must never leak in."""
-    targets.resolve_reason.cache_clear()
+    """`resolve_reason` is `lru_cache`d (time-bounded, see `_resolve_reason_cached`); a stale
+    hit from an earlier test must never leak in."""
+    targets._resolve_reason_cached.cache_clear()
 
 
 @pytest.mark.parametrize(
@@ -132,14 +133,32 @@ def test_a_host_that_does_not_resolve_is_refused(monkeypatch: pytest.MonkeyPatch
 
 
 def test_resolve_reason_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`allowed` runs for every link a crawl enqueues; a DNS lookup per host must run once."""
+    """`allowed` runs for every link a crawl enqueues; a DNS lookup per host must run once
+    within the cache's time window."""
     fake = _FakeResolver("93.184.216.34")
     monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
+    monkeypatch.setattr(targets.time, "monotonic", lambda: 1000.0)
     targets.resolve_reason("cached.example")
     targets.resolve_reason("cached.example")
     assert fake.calls == 1
-    info = targets.resolve_reason.cache_info()
+    info = targets._resolve_reason_cached.cache_info()
     assert (info.hits, info.misses) == (1, 1)
+
+
+def test_resolve_reason_cache_does_not_live_forever(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FINDING 2: an unbounded cache would let a host that resolves publicly exactly once stay
+    exempt from the address check for the life of the process. Once the clock moves into a
+    new cache window, the host is looked up again rather than trusted from the earlier result
+    (manipulating the clock, not sleeping, so this stays instant).
+    """
+    fake = _FakeResolver("93.184.216.34")
+    monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
+    monkeypatch.setattr(targets.time, "monotonic", lambda: 0.0)
+    targets.resolve_reason("rebinding.example")
+    assert fake.calls == 1
+    monkeypatch.setattr(targets.time, "monotonic", lambda: targets._RESOLVE_CACHE_SECONDS + 1)
+    targets.resolve_reason("rebinding.example")
+    assert fake.calls == 2  # re-resolved, not served from the earlier window forever
 
 
 def test_ok_refuses_a_bad_url_without_ever_resolving_it(monkeypatch: pytest.MonkeyPatch) -> None:
