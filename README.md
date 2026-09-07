@@ -209,14 +209,18 @@ is what lets `dev/fixture_site.py` crawl `127.0.0.1`.
 
 Honest limitations of this feature:
 
-- **DNS rebinding is not defended.** The address check's own DNS lookup is cached for 60
-  seconds per host (so a crawl that asks it about the same host many times pays for one
-  lookup, not one per link) and nothing pins the resolved address through to the request
-  that actually fetches it — the connection re-resolves the host on its own. A host an
-  attacker controls the DNS for can answer safely whenever it is checked and differently
-  whenever it is fetched, at any point after the first check, not only in a narrow window
-  right after it. Closing this means threading the resolved address through httpx's
-  connection, which has not been done.
+- **DNS rebinding is defended at the connection, not just the pre-flight check.** The address
+  check in `POST /api/crawls` (above) and the actual TCP connection used to be two independent
+  DNS lookups, which is what let a rebinding host answer safely at check time and differently a
+  moment later. For dashboard-initiated crawls, `crawler.pinning.PinningTransport` now resolves
+  each host itself, checks every address that resolution returns, and connects to exactly the
+  address it checked — the original hostname is kept for the `Host` header and TLS SNI, so
+  certificate validation still passes. What remains: the pre-flight check and the transport still
+  each do their own lookup and can in principle disagree, but the transport's lookup is the one
+  that decides what gets connected to, so a rebinding host cannot slip past it the way it could
+  slip past the pre-flight check alone. This only applies to the dashboard's crawl path —
+  `seo-scout crawl` from the CLI uses an unpinned client, unchanged, which is what lets
+  `dev/fixture_site.py` keep crawling `127.0.0.1`.
 - **No cancel.** A running crawl cannot be stopped from the dashboard. `--max-pages` and the
   30-minute wall clock bound how long a mistaken crawl runs.
 - **One crawl at a time**, with no queue — a second `POST /api/crawls` while one is running gets

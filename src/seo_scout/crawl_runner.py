@@ -24,6 +24,7 @@ from seo_scout.api import targets
 from seo_scout.audit.service import audit_run
 from seo_scout.config import Settings
 from seo_scout.crawler.crawler import Crawler
+from seo_scout.crawler.pinning import Blocked, PinningTransport
 from seo_scout.store import db
 
 log = logging.getLogger("seo_scout.crawl_runner")
@@ -31,14 +32,22 @@ log = logging.getLogger("seo_scout.crawl_runner")
 Crawl = Callable[[str, int | None], Coroutine[Any, Any, None]]
 
 
-def build_client(settings: Settings) -> httpx.AsyncClient:
-    """An httpx client trusting the OS certificate store, for the crawler and AI calls alike."""
+def build_client(settings: Settings, *, blocked: Blocked | None = None) -> httpx.AsyncClient:
+    """An httpx client trusting the OS certificate store, for the crawler's own requests.
+
+    `blocked`, when given, pins every connection to the address it was resolved and checked
+    against (see `crawler.pinning`) — used only for dashboard-initiated crawls, where the URL
+    came from a client rather than the operator. The OpenAI client does not share this client
+    (`ai.client.make_completer` builds its own), so pinning here never touches AI calls.
+    """
     tls = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    # A transport passed to AsyncClient is used as-is: verify/http2 must go to the
+    # transport itself, or AsyncClient silently ignores them (see httpx's _init_transport).
+    transport = PinningTransport(blocked=blocked, verify=tls, http2=False)
     return httpx.AsyncClient(
-        http2=False,
         headers={"user-agent": settings.user_agent},
         timeout=settings.request_timeout,
-        verify=tls,
+        transport=transport,
     )
 
 
@@ -85,7 +94,7 @@ class BackgroundCrawler:
         settings, allowlist = self._settings, self._allowlist
         try:
             with closing(db.connect(settings.db)) as conn:
-                async with build_client(settings) as client:
+                async with build_client(settings, blocked=targets.blocked_ip) as client:
                     crawler = Crawler(settings=settings, conn=conn, client=client)
                     crawler.target_ok = lambda u: targets.ok(u, allowlist)
                     result = await crawler.run(url, max_pages=max_pages)
