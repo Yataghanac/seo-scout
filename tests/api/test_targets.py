@@ -11,6 +11,12 @@ from seo_scout.api import targets
 from seo_scout.api.targets import blocked_ip, check_url, ok
 
 
+@pytest.fixture(autouse=True)
+def _clear_resolve_reason_cache() -> None:
+    """`resolve_reason` is `lru_cache`d; a stale hit from an earlier test must never leak in."""
+    targets.resolve_reason.cache_clear()
+
+
 @pytest.mark.parametrize(
     "ip",
     [
@@ -34,6 +40,10 @@ def test_public_addresses_are_allowed(ip: str) -> None:
     assert blocked_ip(ip) is None
 
 
+def test_blocked_ip_refuses_a_value_that_is_not_an_ip_address() -> None:
+    assert blocked_ip("not-an-ip") is not None
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -52,12 +62,20 @@ def test_an_ordinary_public_url_is_allowed() -> None:
     assert check_url("https://example.com/a/b") is None
 
 
+@pytest.mark.parametrize("url", ["", "not a url", "/relative/path"])
+def test_a_url_with_no_host_is_refused(url: str) -> None:
+    """`check_url` is the entry point for free text a client pastes in; a client can paste
+    anything, including text that never parses into a host at all."""
+    reason = check_url(url)
+    assert reason is not None and "no host" in reason
+
+
 def test_the_reason_names_the_host() -> None:
     reason = check_url("http://box.local/")
     assert reason is not None and "box.local" in reason
 
 
-def test_an_allowlist_refuses_everything_else() -> None:
+def test_an_allowlist_narrows_which_sites_are_allowed() -> None:
     assert check_url("https://example.com/", ["client.com"]) is not None
     assert check_url("https://client.com/", ["client.com"]) is None
 
@@ -95,21 +113,18 @@ def test_a_host_with_any_internal_address_is_refused_even_with_a_public_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A host can publish both a public and a private record; every address is checked."""
-    targets.resolve_reason.cache_clear()
     fake = _FakeResolver("93.184.216.34", "10.0.0.5")
     monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
     assert targets.resolve_reason("mixed.example") is not None
 
 
 def test_a_purely_public_host_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
-    targets.resolve_reason.cache_clear()
     fake = _FakeResolver("93.184.216.34")
     monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
     assert targets.resolve_reason("public-only.example") is None
 
 
 def test_a_host_that_does_not_resolve_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    targets.resolve_reason.cache_clear()
     fake = _FakeResolver(error=socket.gaierror("nodename nor servname provided"))
     monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
     reason = targets.resolve_reason("nowhere.example")
@@ -118,7 +133,6 @@ def test_a_host_that_does_not_resolve_is_refused(monkeypatch: pytest.MonkeyPatch
 
 def test_resolve_reason_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     """`allowed` runs for every link a crawl enqueues; a DNS lookup per host must run once."""
-    targets.resolve_reason.cache_clear()
     fake = _FakeResolver("93.184.216.34")
     monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
     targets.resolve_reason("cached.example")
@@ -137,15 +151,14 @@ def test_ok_refuses_a_bad_url_without_ever_resolving_it(monkeypatch: pytest.Monk
 
 
 def test_ok_allows_a_public_url_that_resolves_publicly(monkeypatch: pytest.MonkeyPatch) -> None:
-    targets.resolve_reason.cache_clear()
     fake = _FakeResolver("93.184.216.34")
     monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
     assert ok("https://public.example/") is True
 
 
 def test_ok_respects_the_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A public, publicly-resolving host outside the configured allowlist is still refused."""
-    targets.resolve_reason.cache_clear()
-    fake = _FakeResolver("93.184.216.34")
+    """`check_url`'s allowlist check refuses before `ok` ever reaches DNS resolution."""
+    fake = _FakeResolver("93.184.216.34")  # would make the host look fine, if it ran at all
     monkeypatch.setattr(targets.socket, "getaddrinfo", fake)
     assert ok("https://outside-allowlist.example/", ["client.com"]) is False
+    assert fake.calls == 0
