@@ -30,7 +30,13 @@ truststore (OS certificate store for corporate TLS). No LangChain/Scrapy/Celery/
 - `src/seo_scout/{crawler,audit,ai,store,api,diff}` + `cli.py`, `config.py`, `logging.py`, `models.py`
 - Layers point inward: `crawler`→`store`; `audit`→`models` only; `ai`→`models`,`store`;
   `api`→`store` (+ rule metadata from `audit.registry`); `diff`→`store`; `store` imports
-  none of the others. `cli` wires everything.
+  none of the others. `api` never imports `crawler`, even to let the dashboard start a crawl:
+  `create_app` takes an optional `crawl_runner` (a `Protocol`, `api/routes.py`) and the real
+  implementation is injected from outside, the same seam already used for the OpenAI
+  `Completer` and the crawler's `sleep`. `cli.py` and `crawl_runner.py` are the two wiring
+  modules — `cli` wires the whole app together; `crawl_runner.BackgroundCrawler` is the one
+  piece of `crawler`-importing code the API is ever handed, so `cli.serve` builds it and
+  passes it in rather than `api` reaching for it.
 - I/O at the edges. Rules and validators are pure functions; `audit/service.py` is the
   only audit module that touches the database.
 - Every function < 50 lines (ruff `max-statements=40`), every module < 400 lines (tested).
@@ -67,8 +73,9 @@ Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<i
 
 ## Pending
 
-Nothing open. The four review passes of 2026-09-06 and the six live-run findings of
-2026-09-07 are fixed and recorded in DECISIONS.md.
+Nothing open. The four review passes of 2026-09-06, the six live-run findings of 2026-09-07,
+and the dashboard-crawl feature (`POST /api/crawls`, the SSRF gate in `api/targets.py`,
+shared-token auth, startup reconciliation) are fixed and recorded in DECISIONS.md.
 
 The pipeline has been exercised end to end against live sites on the current code: crawl,
 audit, gpt-4o rewrites, a second run served entirely from the cache, diff, report files and
