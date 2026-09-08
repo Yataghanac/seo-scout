@@ -1,0 +1,30 @@
+[
+ {
+  "id": 1,
+  "start_url": "https://books.toscrape.com/",
+  "status": "complete",
+  "started_at": "2026-09-04T16:02:21Z",
+  "finished_at": "2026-09-04T16:02:47Z",
+  "pages": 50,
+  "error": null,
+  "settings": {
+   "max_pages": 50,
+   "max_depth": 5,
+   "wall_clock_seconds": 1800
+  }
+ },
+ {
+  "id": 4,
+  "start_url": "https://peps.python.org/",
+  "status": "complete",
+  "started_at": "2026-09-05T17:21:30Z",
+  "finished_at": "2026-09-05T17:21:40Z",
+  "pages": 20,
+  "error": null,
+  "settings": {
+   "max_pages": 20,
+   "max_depth": 5,
+   "wall_clock_seconds": 1800
+  }
+ }
+]
