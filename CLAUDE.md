@@ -73,13 +73,19 @@ Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<i
 
 ## Pending
 
-One thing unverified, worth thirty seconds in a real browser: pressing **Enter** to submit
-the dashboard's sign-in field and the crawl URL field. Both are implemented — sign-in is a
-real `<form>` with a `submit` handler, the crawl bar has an explicit Enter `keydown`
-listener — but synthetic key events in browser automation did not trigger either, so it was
-never confirmed by hand. Clicking the buttons is verified and works.
+The Enter-key question is as settled as this machine can settle it (2026-09-08). The **crawl
+bar is confirmed**: typing a URL and pressing Enter fires the `keydown` listener, posts
+`/api/crawls` and shows the gate's answer — `127.0.0.1 is a loopback address` — so one
+keystroke exercised both the listener and the SSRF gate. The **sign-in field is confirmed up
+to the browser's own boundary**: its `submit` handler runs (wrong token → "That token was not
+accepted."; right token → the dashboard loads). What no automation here could do is press
+Enter for real. Browser automation dispatches `keydown` and `keyup` only, with `code=""` and
+`which=0`, and never the `keypress` Chrome uses to decide implicit form submission — measured
+on the page, not assumed; a real Chrome could not reach the server to try. What remains is a
+standard `<form>` with a submit button and a handler proven to work, which is precisely what
+implicit submission triggers. Thirty seconds at a real keyboard would close the last inch.
 
-Otherwise nothing open. The four review passes of 2026-09-06, the six live-run findings of 2026-09-07,
+Nothing else is open. The four review passes of 2026-09-06, the six live-run findings of 2026-09-07,
 and the dashboard-crawl feature (`POST /api/crawls`, the SSRF gate in `api/targets.py`,
 shared-token auth, startup reconciliation) are fixed and recorded in DECISIONS.md.
 
