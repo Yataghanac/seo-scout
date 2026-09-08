@@ -73,17 +73,17 @@ Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<i
 
 ## Pending
 
-The Enter-key question is as settled as this machine can settle it (2026-09-08). The **crawl
-bar is confirmed**: typing a URL and pressing Enter fires the `keydown` listener, posts
-`/api/crawls` and shows the gate's answer — `127.0.0.1 is a loopback address` — so one
-keystroke exercised both the listener and the SSRF gate. The **sign-in field is confirmed up
-to the browser's own boundary**: its `submit` handler runs (wrong token → "That token was not
-accepted."; right token → the dashboard loads). What no automation here could do is press
-Enter for real. Browser automation dispatches `keydown` and `keyup` only, with `code=""` and
-`which=0`, and never the `keypress` Chrome uses to decide implicit form submission — measured
-on the page, not assumed; a real Chrome could not reach the server to try. What remains is a
-standard `<form>` with a submit button and a handler proven to work, which is precisely what
-implicit submission triggers. Thirty seconds at a real keyboard would close the last inch.
+The Enter-key question is closed (2026-09-08), and closing it changed the code. The **crawl
+bar** was confirmed as written: Enter fires its `keydown` listener, posts `/api/crawls` and
+shows the gate's answer — `127.0.0.1 is a loopback address` — so one keystroke exercised both
+the listener and the SSRF gate. **Sign-in could not be confirmed** while it relied on the
+browser's implicit form submission: automation dispatches `keydown`/`keyup` with `code=""` and
+`which=0` and never the `keypress` a browser submits on — measured on the page, not assumed.
+So sign-in now has the same explicit listener as the crawl bar, and Enter there is confirmed
+too: one `POST /api/login`, the error rendered on a wrong token, the dashboard on the right
+one. A parametrised test pins both listeners; `signIn` starts with `if (btn.disabled) return;`
+so no browser can sign in twice from one key. See DECISIONS.md, "The Enter key, and a
+behaviour that could not be tested"
 
 Nothing else is open. The four review passes of 2026-09-06, the six live-run findings of 2026-09-07,
 and the dashboard-crawl feature (`POST /api/crawls`, the SSRF gate in `api/targets.py`,

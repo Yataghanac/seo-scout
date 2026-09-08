@@ -91,6 +91,23 @@ def test_index_serves_the_dashboard(client: TestClient) -> None:
     assert "chart.js" in r.text.lower()
 
 
+@pytest.mark.parametrize("field", ["#crawl-url", "#signin-token"])
+def test_enter_is_an_explicit_listener_not_implicit_submission(
+    client: TestClient, field: str
+) -> None:
+    """Both Enter keys are wired by hand rather than left to the browser.
+
+    A bare `<form>` submits on Enter through implicit submission, which browsers decide on
+    the `keypress` event -- and automation dispatches `keydown`/`keyup` without it, so that
+    path can never be confirmed outside a human's hands. An explicit `keydown` listener can.
+    """
+    body = client.get("/").text
+    listener = f'$("{field}").addEventListener("keydown"'
+    line = next((ln for ln in body.splitlines() if listener in ln), None)
+    assert line is not None, f"{field} has no keydown listener"
+    assert 'e.key === "Enter"' in line
+
+
 def test_runs_are_listed_newest_first(client: TestClient) -> None:
     r = client.get("/api/runs")
     assert r.status_code == 200

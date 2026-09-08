@@ -301,6 +301,9 @@ function showSignInError(text) {
 async function signIn(e) {
   e.preventDefault();
   const btn = $("#signin-form button"), input = $("#signin-token");
+  // Enter reaches here through the keydown listener below. Cancelling that keydown stops the
+  // keypress a browser needs for implicit submission, but do not rely on it: sign in once.
+  if (btn.disabled) return;
   const token = input.value;
   if (!token) { input.focus(); return; }
   btn.disabled = true;
@@ -482,6 +485,7 @@ for (const th of document.querySelectorAll("th[data-k]")) th.onclick = () => { c
 $("#crawl-go").onclick = () => { startCrawl(); };
 $("#crawl-url").addEventListener("keydown", (e) => { if (e.key === "Enter") startCrawl(); });
 $("#signin-form").addEventListener("submit", signIn);
+$("#signin-token").addEventListener("keydown", (e) => { if (e.key === "Enter") signIn(e); });
 init().catch((e) => {
   if (e.status === 401) { showSignIn(); return; }
   $("#notice").hidden = false; $("#notice").textContent = `Could not load data: ${e.message}`;

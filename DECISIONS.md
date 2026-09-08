@@ -739,3 +739,39 @@ working, and a `Secure` cookie is never sent back over plain HTTP at all. The fi
 request: `secure=True` when `request.url.scheme == "https"` or the request carries
 `x-forwarded-proto: https` (the header a TLS-terminating proxy sets), so a direct HTTPS
 deployment and a proxied one both get the attribute while local HTTP is unchanged.
+
+## Post-launch — The Enter key, and a behaviour that could not be tested
+
+**Trigger.** One line stood unverified in CLAUDE.md: pressing **Enter** in the dashboard's two
+input fields. Both were implemented — the crawl bar with an explicit `keydown` listener,
+sign-in as a real `<form>` with a `submit` handler — but no automated check had ever confirmed
+either, and the note said so rather than assuming they worked.
+
+**What the browser showed.** The crawl bar is fine: Enter fires the listener, posts
+`/api/crawls`, and renders the gate's refusal (`127.0.0.1 is a loopback address`) — one
+keystroke exercising the listener and the SSRF gate together. Sign-in could not be confirmed,
+and instrumenting the page said exactly why. The automation dispatches a trusted `keydown` and
+`keyup` with `code: ""` and `which: 0`, and **no `keypress`** — and implicit form submission is
+the browser's response to the keypress. The handler itself was sound (`form.requestSubmit()`
+ran it: wrong token rejected, right token signed in); the keystroke simply never arrived in the
+shape a form needs.
+
+**Non-obvious decision.** Rather than leave a behaviour that only a human can check, sign-in
+now has the same explicit `keydown` listener as the crawl bar. The point is not that implicit
+submission is broken — it is HTML working as specified — but that a behaviour no test can reach
+is a behaviour that silently rots. Two identical fields should not be verifiable by two
+different standards. The listener costs one line and moves sign-in from "specified to work" to
+"observed to work": Enter now produces exactly one `POST /api/login`, 401 with the error
+rendered on a wrong token, 200 and the dashboard on the right one.
+
+**Failure mode prevented.** Both Enter paths are now pinned by a parametrised test asserting
+the listener exists for `#crawl-url` and `#signin-token`, so neither can be quietly dropped in
+a later edit of the dashboard's one script block. And `signIn` opens with `if (btn.disabled)
+return;`: cancelling the `keydown` suppresses the keypress in every browser that matters, but
+if some browser ever ran both paths, the guard means one sign-in, not two.
+
+**What I chose not to do.** No headless-browser test rig (Playwright, jsdom) for one script
+block. The dashboard is deliberately one static file with no build step; adding a browser
+runtime and a Node toolchain to assert a two-line listener would cost more to explain than the
+behaviour is worth. The test asserts the wiring, and a browser confirmed the behaviour once,
+by hand, on the record here.
