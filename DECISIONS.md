@@ -891,3 +891,35 @@ screenshot showed it.
 file served by `api/app.py`, still Chart.js from a CDN with an integrity hash. The redesign is
 CSS and a few dozen lines of vanilla JS, which keeps the dependency story of the whole project
 "httpx, selectolax, sqlite3, openai" rather than "…and a frontend toolchain".
+
+## Post-launch — Stopping a crawl without throwing it away
+
+**Trigger.** The README listed "no cancel" as an honest limitation: a crawl started from the
+dashboard ran until its page cap or the thirty-minute wall clock, and a client who pasted the
+wrong URL could only wait. That is the last thing between this and something you would hand to
+someone else.
+
+**Non-obvious decision: cooperative, not `Task.cancel()`.** The obvious implementation is one
+line — the runner already holds the `asyncio.Task`. It is also wrong. `_run_guarded` treats
+`CancelledError` as "interrupted", marks the run partial and re-raises, which unwinds
+`_real_crawl` before the audit and the AI stage ever run. The user would press Stop after
+forty pages and be left with forty rows of nothing: no scores, no issues, no rewrites, for
+pages already fetched and, if the key was set, already paid for. So Stop sets a flag the crawl
+loop reads between passes and raises `CrawlAborted("stopped by request")` — the same path the
+network-failure abort already takes. The run finishes as `partial`, and audit and enrichment
+run on everything fetched. Confirmed live: stopped at 28 pages, the three fetches in flight
+completed, and all 31 were audited into 112 issues.
+
+**The seam.** `Crawler.stop_requested` is a predicate beside `target_ok`: the dashboard's
+runner supplies `BackgroundCrawler.stop_requested`, the CLI leaves the default saying no,
+because a terminal already has Ctrl+C. `crawler/` still imports nothing from `api/`, and the
+API's `CrawlRunner` Protocol gains one method rather than a reference to a crawler.
+
+**Failure mode prevented.** `start()` clears the flag. Without that, one stop would end the
+next crawl the moment it began — the runner outlives any single crawl, and a stale flag is
+exactly the kind of state that survives into the wrong request. A test pins it.
+
+**What I chose not to do.** No queue, no pause/resume, no per-run cancellation token. One
+crawl runs at a time, so "stop the running one" needs no addressing; `POST /api/crawls/stop`
+answers 409 when there is nothing to stop, and the dashboard treats that 409 as success
+because it means the crawl finished between the click and the request.

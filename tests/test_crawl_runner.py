@@ -45,3 +45,43 @@ async def test_a_failed_crawl_does_not_wedge_the_runner(settings: Settings) -> N
     assert runner.start("https://e.com/", None) is True
     await runner.wait()
     assert runner.start("https://e.com/", None) is True
+
+
+async def test_stop_asks_the_running_crawl_and_nothing_else(settings: Settings) -> None:
+    """`stop()` reports whether there was anything to stop; `stop_requested()` is what the
+    crawler reads between passes of its loop."""
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def fake_crawl(url: str, max_pages: int | None) -> None:
+        started.set()
+        await release.wait()
+
+    runner = BackgroundCrawler(settings, _crawl=fake_crawl)
+    assert runner.stop() is False  # nothing is running
+    assert runner.stop_requested() is False
+
+    assert runner.start("https://e.com/", None) is True
+    await started.wait()
+    assert runner.stop() is True
+    assert runner.stop_requested() is True
+
+    release.set()
+    await runner.wait()
+    assert runner.stop() is False  # the crawl is over; there is nothing left to ask
+
+
+async def test_the_next_crawl_does_not_inherit_the_last_ones_stop(settings: Settings) -> None:
+    """A stop applies to the crawl it was aimed at, or the next one would end immediately."""
+    started = asyncio.Event()
+
+    async def fake_crawl(url: str, max_pages: int | None) -> None:
+        started.set()
+
+    runner = BackgroundCrawler(settings, _crawl=fake_crawl)
+    runner.start("https://e.com/", None)
+    await started.wait()
+    runner.stop()
+    await runner.wait()
+
+    runner.start("https://e.com/", None)
+    assert runner.stop_requested() is False

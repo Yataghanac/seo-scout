@@ -21,14 +21,22 @@ from seo_scout.store import db, repo_pages, repo_runs
 class FakeRunner:
     """Stands in for the real crawler. Records what it was asked to do."""
 
-    def __init__(self, busy: bool = False) -> None:
+    def __init__(self, busy: bool = False, running: bool = False) -> None:
         self.busy = busy
+        self.running = running
         self.started: list[tuple[str, int | None]] = []
+        self.stops = 0
 
     def start(self, url: str, max_pages: int | None) -> bool:
         if self.busy:
             return False
         self.started.append((url, max_pages))
+        return True
+
+    def stop(self) -> bool:
+        if not self.running:
+            return False
+        self.stops += 1
         return True
 
 
@@ -203,3 +211,24 @@ def test_a_second_post_while_the_real_crawl_is_still_running_is_refused(tmp_path
         second = client.post("/api/crawls", json={"url": "https://example.com"})
         assert second.status_code == 409
         release.set()
+
+
+def test_stopping_a_running_crawl_asks_the_runner(tmp_path: Path) -> None:
+    runner = FakeRunner(running=True)
+    response = _client(tmp_path, runner).post("/api/crawls/stop")
+    assert response.status_code == 202
+    assert response.json() == {"status": "stopping"}
+    assert runner.stops == 1
+
+
+def test_stopping_when_nothing_is_running_is_a_conflict(tmp_path: Path) -> None:
+    runner = FakeRunner(running=False)
+    response = _client(tmp_path, runner).post("/api/crawls/stop")
+    assert response.status_code == 409
+    assert "no crawl" in response.json()["detail"]
+    assert runner.stops == 0
+
+
+def test_stopping_where_crawls_are_not_offered_at_all_is_501(tmp_path: Path) -> None:
+    response = _client(tmp_path, None).post("/api/crawls/stop")
+    assert response.status_code == 501

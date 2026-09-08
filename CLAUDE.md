@@ -93,6 +93,12 @@ that borrows the crawl bar itself, four triage chips, a detail panel with close 
 healthy 25-page crawl and `dev/fixture_site.py`'s deliberately broken one (5 criticals, no AI
 stage). See DECISIONS.md, "The dashboard, redesigned around the first ten seconds".
 
+A running crawl can now be stopped from the dashboard (**Stop**, `POST /api/crawls/stop`).
+Cooperative: `Crawler.stop_requested` is a predicate beside `target_ok`, read between passes of
+the crawl loop, so the run ends `partial` and everything fetched is still audited and rewritten
+— cancelling the task would have thrown that away. See DECISIONS.md, "Stopping a crawl without
+throwing it away".
+
 Three PRs are open and stacked in this order — **#3 → #4 → #5**. Claude cannot merge them:
 `gh pr merge` is refused by the permission classifier here. #4 and #5 both append to
 DECISIONS.md, so whichever lands second needs its entry moved after the other's; nothing else
