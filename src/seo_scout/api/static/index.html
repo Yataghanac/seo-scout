@@ -720,7 +720,10 @@ $("#signin-token").addEventListener("keydown", (e) => { if (e.key === "Enter") s
 // Two keys, the ones people reach for without being told: / to search, Esc to close.
 document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement ? document.activeElement.tagName : "");
-  if (e.key === "/" && !typing) { e.preventDefault(); $("#q").focus(); $("#q").select(); }
+  // Only steal "/" when there is a filter box on screen to steal it for. The empty state hides
+  // the table with `hidden`; the sign-in screen hides it with an inline `display`. offsetParent
+  // is null for both, so it catches either without caring which.
+  if (e.key === "/" && !typing && $("#q").offsetParent !== null) { e.preventDefault(); $("#q").focus(); $("#q").select(); }
   else if (e.key === "Escape") { if (!$("#detail").hidden) closeDetail(); else if (typing) document.activeElement.blur(); }
 });
 init().catch((e) => {
