@@ -923,3 +923,28 @@ exactly the kind of state that survives into the wrong request. A test pins it.
 crawl runs at a time, so "stop the running one" needs no addressing; `POST /api/crawls/stop`
 answers 409 when there is nothing to stop, and the dashboard treats that 409 as success
 because it means the crawl finished between the click and the request.
+
+## Post-launch — What people type is a hostname
+
+**Trigger.** Someone pasted `www.books.toscrape.com` into the crawl box and got *"that is not
+an http(s) URL"*. They were right and the tool was wrong: a bare hostname is what a person
+types, and refusing it is the tool making its parser the user's problem.
+
+**Non-obvious decision: a regex, not `urlsplit`.** The obvious test for "does this already have
+a scheme" is `urlsplit(raw).scheme`, and it is wrong here — `urlsplit("example.com:8443")`
+reports a scheme of `"example.com"`, so a perfectly good host:port paste would be passed through
+untouched and then refused. What actually distinguishes the two is shape, so
+`^[\w.-]+(:\d+)?(/.*)?$` decides: anything shaped like host, optional port, optional path gets
+`https://` in front of it; anything else is handed to `link_pair` exactly as typed.
+
+**Failure mode prevented.** `javascript:alert(1)`, `file:///etc/passwd`, `ftp://…` and
+`//evil.com` all fail that shape test, so a scheme is never *guessed at* — only supplied where
+there is none. They are refused with the same message as before, and each is a test case. The
+SSRF gate still runs afterwards either way: this changes what gets parsed, never what gets
+allowed.
+
+**What I chose not to do.** Not in `urls.link_pair`. That function is the project's notion of a
+page's identity, used when parsing links out of crawled HTML, where a scheme-less string means
+a *relative* URL — teaching it to guess `https://` would quietly corrupt every relative link on
+every page. The guess belongs at the one edge where a human types, so it lives in
+`api/routes.py`. The CLI still wants a full URL, which is the right default for a terminal.

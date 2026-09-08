@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sqlite3
 from collections.abc import Iterator
 from typing import Annotated, Protocol
@@ -56,6 +57,18 @@ class CrawlRequest(BaseModel):
     max_pages: int | None = None
 
 
+# What someone types into the crawl box is usually a hostname, not a URL. Anything shaped like
+# host[:port][/path] gets https:// in front of it; anything already carrying a scheme is left
+# exactly as typed, so `javascript:` and `file:` are refused rather than guessed at. urlsplit
+# cannot make this call — it reads "example.com:8443" as a scheme of "example.com".
+_BARE_HOST = re.compile(r"^[\w.-]+(:\d+)?(/.*)?$", re.ASCII)
+
+
+def _as_typed(url: str) -> str:
+    """A bare host means https. Everything else is passed through for link_pair to judge."""
+    return f"https://{url}" if _BARE_HOST.match(url) else url
+
+
 def _run_or_404(conn: sqlite3.Connection, run_id: int) -> Run:
     run = repo_runs.get_run(conn, run_id)
     if run is None:
@@ -77,7 +90,7 @@ async def start_crawl(body: CrawlRequest, request: Request) -> dict[str, str]:
     runner: CrawlRunner | None = request.app.state.crawl_runner
     if runner is None:
         raise HTTPException(status_code=501, detail="this deployment cannot start crawls")
-    link = link_pair(body.url)
+    link = link_pair(_as_typed(body.url))
     if link is None:
         raise HTTPException(status_code=400, detail="that is not an http(s) URL")
     allowlist = request.app.state.allowlist

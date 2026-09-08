@@ -232,3 +232,35 @@ def test_stopping_when_nothing_is_running_is_a_conflict(tmp_path: Path) -> None:
 def test_stopping_where_crawls_are_not_offered_at_all_is_501(tmp_path: Path) -> None:
     response = _client(tmp_path, None).post("/api/crawls/stop")
     assert response.status_code == 501
+
+
+def test_a_bare_host_is_read_as_https(tmp_path: Path) -> None:
+    """Pasting `books.toscrape.com` is what people do; refusing it is the tool's problem."""
+    runner = FakeRunner()
+    response = _client(tmp_path, runner).post("/api/crawls", json={"url": "books.toscrape.com"})
+    assert response.status_code == 202
+    assert runner.started == [("https://books.toscrape.com/", None)]
+
+
+def test_a_bare_host_keeps_its_path_and_port(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    _client(tmp_path, runner).post("/api/crawls", json={"url": "example.com:8443/catalogue"})
+    assert runner.started == [("https://example.com:8443/catalogue", None)]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "javascript:alert(1)",  # a scheme, just not one we fetch: never guessed at
+        "file:///etc/passwd",
+        "ftp://example.com",
+        "//evil.com",  # scheme-relative, and not a host: still not a URL
+        "not a url",
+        "",
+    ],
+)
+def test_what_is_not_a_host_is_still_refused(tmp_path: Path, url: str) -> None:
+    runner = FakeRunner()
+    response = _client(tmp_path, runner).post("/api/crawls", json={"url": url})
+    assert response.status_code == 400
+    assert runner.started == []

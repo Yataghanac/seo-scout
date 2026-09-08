@@ -605,7 +605,7 @@ function renderNotice() {
     // No page count here: the crawl bar already shows a live one, and the run row's own
     // count is whatever was stored when this summary was built — a second contradicting it.
     ? `Run ${run.id} is still crawling. This page updates when it finishes.`
-    : `Run ${run.id} is ${run.status}${run.error ? ": " + run.error : ""}. Results below cover the pages fetched before it stopped.`;
+    : `Run ${run.id} is ${run.status}${run.error ? ": " + run.error : ""}. ${run.pages ? "Results below cover the pages fetched before it stopped." : "Nothing was fetched, so there is nothing below."}`;
 }
 
 function renderTiles() {
