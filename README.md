@@ -183,7 +183,8 @@ schtasks /Create /SC WEEKLY /D MON /ST 06:00 /TN "SEO Scout" /TR "cmd /c cd /d C
 ## Hosting it for someone else
 
 Everything above assumes you are the only one running commands. `seo-scout serve` can also sit
-on a box a client reaches over the network: paste a URL into the field in the dashboard header,
+on a box a client reaches over the network: paste a URL — or just a hostname, `https` is
+assumed — into the field in the dashboard header,
 press **Crawl**, and the server runs the crawl in the background while the page polls for
 progress (`crawling https://example.com — 12 pages`) and switches to the finished run when it's
 done. **Stop** ends one early and keeps what it has: the run is marked `partial`, and those
