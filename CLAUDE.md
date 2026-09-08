@@ -74,14 +74,16 @@ choice in `localStorage`; with neither, the OS decides.
 
 ## The hosted demo
 
-`https://yataghanac.github.io/seo-scout/` is the shipped dashboard reading a frozen snapshot,
-published from the `gh-pages` branch. It cannot be Vercel or any serverless host: a crawl runs
-for minutes and writes to SQLite. To refresh it:
+`demo-site/` is the shipped dashboard reading a frozen snapshot — a static folder, ready to
+deploy anywhere that serves files. It is deliberately **not** published from this repository:
+GitHub Pages was tried on 2026-09-08 and taken down the same day at the owner's request, and
+the demo is meant to live on Vercel instead (import the repo, root directory `demo-site`, no
+build command). What it cannot be is a *running* deployment of the product: a crawl takes
+minutes and writes to SQLite, which no serverless host provides.
 
 ```bash
 uv run seo-scout serve --port 8000                      # the snapshot's source
 uv run python dev/build_demo_site.py --runs 1 4         # writes demo-site/
-git subtree split --prefix demo-site -b gh-pages-new && git push -f origin gh-pages-new:gh-pages
 ```
 
 The build asserts every anchor it replaces in `index.html`, so a dashboard edit that breaks the
