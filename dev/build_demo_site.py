@@ -131,6 +131,8 @@ def main() -> None:
     data.mkdir(parents=True)
     snapshot(args.api, args.runs, data)
     (OUT / "index.html").write_text(rewrite(SOURCE.read_text(encoding="utf-8")), encoding="utf-8")
+    # GitHub Pages runs Jekyll unless told not to, and Jekyll would drop the data directory.
+    (OUT / ".nojekyll").write_text("", encoding="utf-8")
     written = sorted(p.relative_to(OUT).as_posix() for p in OUT.rglob("*") if p.is_file())
     size = sum(p.stat().st_size for p in OUT.rglob("*") if p.is_file())
     print(f"demo-site/: {len(written)} files, {size // 1024} KB")
