@@ -26,10 +26,16 @@ What you will see:
 
 - **Start here**: the five weakest pages and the one thing wrong with each. Work from the top.
 - **Tiles and charts**: the overall score, issue counts by severity and by rule.
-- **The table**: every page, filterable by severity, rule, AI status or URL. Click a page.
+- **The table**: every page. Four chips do the common triage in one click — all pages, the
+  ones needing work, the ones with a rewrite, the clean ones — and severity, rule, AI status
+  and URL narrow it further. `/` jumps to the filter box.
 - **Before / after**: for each weak page, the current title and meta beside a validated
   rewrite with a copy button. A verdict line says whether the model passed first time,
-  needed a repair, or was rejected, and why.
+  needed a repair, or was rejected, and why. `‹` and `›` walk the filtered list without
+  closing the panel; **Esc** closes it.
+
+It opens in your system's light or dark theme and the ◐ button in the header switches, which
+it remembers. A fresh install with nothing crawled yet shows one field and one button.
 
 Without an API key everything above still works except the rewrites; the tool prints one
 warning and moves on. A typical keyed run of 50 pages ends like this:
