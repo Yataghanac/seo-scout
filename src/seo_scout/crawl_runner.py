@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import ssl
-from asyncio import Task, create_task
+from asyncio import Event, Task, create_task
 from collections.abc import Callable, Coroutine, Sequence
 from contextlib import closing, suppress
 from typing import Any
@@ -56,6 +56,7 @@ class BackgroundCrawler:
         self._allowlist = list(allowlist)
         self._crawl = _crawl or self._real_crawl
         self._task: Task[None] | None = None
+        self._stop = Event()
 
     def start(self, url: str, max_pages: int | None) -> bool:
         """Begin a crawl in the background. False when one is already running.
@@ -66,8 +67,25 @@ class BackgroundCrawler:
         """
         if self._task is not None and not self._task.done():
             return False
+        self._stop.clear()  # a stop belongs to the crawl it was aimed at, not the next one
         self._task = create_task(self._crawl(url, max_pages))
         return True
+
+    def stop(self) -> bool:
+        """Ask the running crawl to stop. False when there is nothing to stop.
+
+        Cooperative, not `Task.cancel()`: the crawler notices between passes of its loop,
+        finishes the fetches already in flight, and the run then takes the normal path
+        through audit and the AI stage. Cancelling would abandon pages already fetched.
+        """
+        if self._task is None or self._task.done():
+            return False
+        self._stop.set()
+        return True
+
+    def stop_requested(self) -> bool:
+        """What the crawler reads between passes. Public so it can be handed over as a seam."""
+        return self._stop.is_set()
 
     async def wait(self) -> None:
         """For tests: await the running crawl, and swallow whatever it raised.
@@ -88,6 +106,7 @@ class BackgroundCrawler:
                 async with build_client(settings) as client:
                     crawler = Crawler(settings=settings, conn=conn, client=client)
                     crawler.target_ok = lambda u: targets.ok(u, allowlist)
+                    crawler.stop_requested = self.stop_requested
                     result = await crawler.run(url, max_pages=max_pages)
                 if result.status == "failed":
                     return

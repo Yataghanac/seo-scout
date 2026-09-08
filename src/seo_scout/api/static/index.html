@@ -79,6 +79,10 @@
   .primary:hover:not(:disabled) { filter: brightness(1.08); }
   .ghost { background: transparent; color: var(--muted); border-color: var(--line); padding: 7px 10px; line-height: 1; }
   .ghost:hover { color: var(--accent); }
+  /* Stopping is the one destructive-ish thing on this bar, so it answers in the warning colour
+     rather than the accent every other control uses. */
+  #crawl-stop { padding: 8px 14px; }
+  #crawl-stop:hover:not(:disabled) { color: var(--critical); border-color: var(--critical); }
   .exports { display: flex; gap: 6px; }
   .exports a { font: 500 11px var(--mono); letter-spacing: .07em; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; }
   .exports a:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
@@ -243,6 +247,7 @@
     <span class="crawlbar" id="crawlbar">
       <input id="crawl-url" type="url" placeholder="https://example.com — paste a site to crawl" autocomplete="off" aria-label="Site to crawl">
       <button id="crawl-go" class="primary">Crawl</button>
+      <button id="crawl-stop" class="ghost" hidden>Stop</button>
       <span class="crawl-msg" id="crawl-msg" role="status" aria-live="polite"></span>
     </span>
   </div>
@@ -308,7 +313,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const params = new URLSearchParams(location.search);
 if (params.has("still")) document.documentElement.dataset.still = "1";
-const state = { runId: null, summary: null, pages: [], sort: "score", order: "asc", page: 1, size: Number(params.get("size")) || 50, selected: null, chip: "all", charts: {} };
+const state = { runId: null, summary: null, pages: [], sort: "score", order: "asc", page: 1, size: Number(params.get("size")) || 50, selected: null, chip: "all", stopping: false, charts: {} };
 let crawlPoll = null;
 
 // ?theme wins (the screenshot hook, and any link someone shares), then the toggle's own
@@ -393,6 +398,9 @@ function setCrawlMsg(text, isErr) {
 
 function crawlDone() {
   $("#crawl-go").disabled = false;
+  $("#crawl-stop").hidden = true;
+  $("#crawl-stop").disabled = false;
+  state.stopping = false;
   crawlPoll = null;
   delete document.body.dataset.crawling;
 }
@@ -407,7 +415,8 @@ async function pollCrawl() {
     const runs = await api("/api/runs");
     const running = runs.find((r) => r.status === "running");
     if (running) {
-      setCrawlMsg(`crawling ${running.start_url} — ${running.pages} pages`);
+      const verb = state.stopping ? "stopping" : "crawling";
+      setCrawlMsg(`${verb} ${running.start_url} — ${running.pages} pages`);
       crawlPoll = setTimeout(pollCrawl, 2000);
       return;
     }
@@ -428,6 +437,8 @@ async function startCrawl() {
   if (!url) { input.focus(); return; }
   stopPolling();
   btn.disabled = true;
+  state.stopping = false;
+  $("#crawl-stop").hidden = false;
   document.body.dataset.crawling = "1";
   setCrawlMsg("starting…");
   let started = false;
@@ -449,6 +460,32 @@ async function startCrawl() {
   }
   if (!started) { crawlDone(); return; }
   await pollCrawl();
+}
+
+// Stopping is a request, not a kill: the server finishes the fetches in flight, then audits
+// and rewrites what it has. The polling loop below carries on and switches to the finished
+// (partial) run exactly as it would for a crawl that ended on its own.
+async function stopCrawl() {
+  const btn = $("#crawl-stop");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  state.stopping = true;
+  setCrawlMsg("stopping — finishing the pages already in flight…");
+  try {
+    const r = await fetch("/api/crawls/stop", { method: "POST" });
+    // 409 means it finished between the click and the request: the poll will notice.
+    if (!r.ok && r.status !== 409) {
+      let detail = `${r.status} ${r.statusText}`;
+      try { const body = await r.json(); if (body && body.detail) detail = body.detail; } catch (e) {}
+      setCrawlMsg(detail, true);
+      state.stopping = false;
+      btn.disabled = false;
+    }
+  } catch (e) {
+    setCrawlMsg(`could not reach the server: ${e.message}`, true);
+    state.stopping = false;
+    btn.disabled = false;
+  }
 }
 
 function showSignIn() {
@@ -714,6 +751,7 @@ for (const chip of document.querySelectorAll(".chip")) chip.onclick = () => {
 };
 for (const th of document.querySelectorAll("th[data-k]")) th.onclick = () => { const k = th.dataset.k; state.order = state.sort === k && state.order === "asc" ? "desc" : "asc"; state.sort = k; state.page = 1; renderTable(); };
 $("#crawl-go").onclick = () => { startCrawl(); };
+$("#crawl-stop").onclick = () => { stopCrawl(); };
 $("#crawl-url").addEventListener("keydown", (e) => { if (e.key === "Enter") startCrawl(); });
 $("#signin-form").addEventListener("submit", signIn);
 $("#signin-token").addEventListener("keydown", (e) => { if (e.key === "Enter") signIn(e); });

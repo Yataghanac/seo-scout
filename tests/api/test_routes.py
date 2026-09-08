@@ -104,7 +104,14 @@ def test_the_hidden_attribute_is_forced_to_win(client: TestClient) -> None:
 def test_the_dashboard_ships_its_first_run_and_triage_affordances(client: TestClient) -> None:
     """The parts a first-time user meets, pinned so a later edit cannot quietly drop them."""
     body = client.get("/").text
-    for probe in ('id="hero"', 'id="theme-toggle"', 'data-chip="attention"', 'id="detail-close"'):
+    probes = (
+        'id="hero"',
+        'id="theme-toggle"',
+        'data-chip="attention"',
+        'id="detail-close"',
+        'id="crawl-stop"',
+    )
+    for probe in probes:
         assert probe in body, f"{probe} is gone from the dashboard"
 
 

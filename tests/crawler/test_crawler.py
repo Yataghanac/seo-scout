@@ -235,6 +235,48 @@ async def test_wall_clock_budget_yields_partial_run(
 
 
 @respx.mock
+async def test_a_stop_request_ends_the_run_partial_and_keeps_what_it_fetched(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    """Stopping is cooperative, not a cancellation: the pages already in are still the run's.
+
+    The loop asks between iterations, so the first page lands and the frontier behind it is
+    abandoned rather than fetched.
+    """
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html("/a", "/b")))
+    for p in "ab":
+        respx.get(f"https://e.com/{p}").mock(return_value=httpx.Response(200, html=html()))
+    crawler = make(conn, client)
+    asked = 0
+
+    def stop_after_the_first_pass() -> bool:
+        nonlocal asked
+        asked += 1
+        return asked > 1
+
+    crawler.stop_requested = stop_after_the_first_pass
+    report = await crawler.run("https://e.com/")
+
+    assert report.status == "partial"
+    assert report.error == "stopped by request"
+    assert list(urls(conn, report.run_id)) == ["https://e.com/"]
+    run = repo_runs.get_run(conn, report.run_id)
+    assert run is not None and run.status == "partial" and run.error == "stopped by request"
+
+
+@respx.mock
+async def test_a_crawl_nobody_stops_never_asks_twice_for_nothing(
+    conn: sqlite3.Connection, client: httpx.AsyncClient
+) -> None:
+    """The default predicate says no, and a crawl with no one to stop it still completes."""
+    no_robots_no_sitemap()
+    respx.get("https://e.com/").mock(return_value=httpx.Response(200, html=html()))
+    report = await make(conn, client).run("https://e.com/")
+    assert report.status == "complete"
+
+
+@respx.mock
 async def test_dry_run_fetches_no_pages(
     conn: sqlite3.Connection, client: httpx.AsyncClient
 ) -> None:
