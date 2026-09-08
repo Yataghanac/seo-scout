@@ -97,6 +97,10 @@ class Crawler:
         # A second gate beside robots.txt, set by whoever built this crawler. The API sets it
         # so a client-supplied URL cannot redirect into the network; the CLI leaves it open.
         self.target_ok: Callable[[str], bool] = lambda _url: True
+        # Asked between passes of the loop. The dashboard's Stop button sets it; the CLI, which
+        # has Ctrl+C, leaves it saying no. Cooperative on purpose: cancelling the task would
+        # throw away the audit and the rewrites for pages already fetched and paid for.
+        self.stop_requested: Callable[[], bool] = lambda: False
 
     def _gate(self, policy: RobotsPolicy) -> Callable[[str], bool]:
         """robots.txt composed with `target_ok`. Every call site must use this, never
@@ -193,6 +197,8 @@ class Crawler:
         concurrency = self._settings.max_concurrency
         try:
             while True:
+                if self.stop_requested():
+                    raise CrawlAborted("stopped by request")
                 while state.frontier and len(state.pending) < concurrency:
                     if state.scheduled >= state.max_pages:
                         break

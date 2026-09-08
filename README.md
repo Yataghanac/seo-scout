@@ -186,7 +186,8 @@ Everything above assumes you are the only one running commands. `seo-scout serve
 on a box a client reaches over the network: paste a URL into the field in the dashboard header,
 press **Crawl**, and the server runs the crawl in the background while the page polls for
 progress (`crawling https://example.com — 12 pages`) and switches to the finished run when it's
-done. No terminal needed on the client's end.
+done. **Stop** ends one early and keeps what it has: the run is marked `partial`, and those
+pages are audited and rewritten like any other. No terminal needed on the client's end.
 
 Two settings change once someone else can reach the dashboard, both in `.env`:
 
@@ -227,8 +228,11 @@ Honest limitations of this feature:
   slip past the pre-flight check alone. This only applies to the dashboard's crawl path —
   `seo-scout crawl` from the CLI uses an unpinned client, unchanged, which is what lets
   `dev/fixture_site.py` keep crawling `127.0.0.1`.
-- **No cancel.** A running crawl cannot be stopped from the dashboard. `--max-pages` and the
-  30-minute wall clock bound how long a mistaken crawl runs.
+- **A stop is cooperative, not instant.** **Stop** asks the crawler to finish; it notices
+  between passes of its loop, so the fetches already in flight complete first — a second or
+  two, or one request timeout at worst. Nothing is thrown away: the run is marked `partial`
+  and the pages already fetched are audited and rewritten as usual. `--max-pages` and the
+  30-minute wall clock still bound a crawl nobody is watching.
 - **One crawl at a time**, with no queue — a second `POST /api/crawls` while one is running gets
   `409`.
 - **One shared token** for the whole deployment: no per-user login, and nothing to revoke for

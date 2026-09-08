@@ -47,6 +47,9 @@ class CrawlRunner(Protocol):
     def start(self, url: str, max_pages: int | None) -> bool:
         """Begin a crawl in the background. False when one is already running."""
 
+    def stop(self) -> bool:
+        """Ask the running crawl to stop. False when there is nothing to stop."""
+
 
 class CrawlRequest(BaseModel):
     url: str
@@ -86,6 +89,25 @@ async def start_crawl(body: CrawlRequest, request: Request) -> dict[str, str]:
     if not runner.start(link.url, body.max_pages):
         raise HTTPException(status_code=409, detail="a crawl is already running")
     return {"status": "started"}
+
+
+@router.post("/crawls/stop", status_code=202)
+async def stop_crawl(request: Request) -> dict[str, str]:
+    """Ask the running crawl to stop. 202, not 200: it ends when the fetches in flight do.
+
+    `async def` for the same reason `start_crawl` is: a sync endpoint runs in a threadpool
+    worker, and what this touches belongs to the event loop's thread.
+
+    A stopped run is not a lost one. The crawler notices between passes, finishes what is in
+    flight, and the run then takes the ordinary path — marked `partial`, audited, and sent
+    through the AI stage — so the pages already fetched (and paid for) are all there.
+    """
+    runner: CrawlRunner | None = request.app.state.crawl_runner
+    if runner is None:
+        raise HTTPException(status_code=501, detail="this deployment cannot start crawls")
+    if not runner.stop():
+        raise HTTPException(status_code=409, detail="no crawl is running")
+    return {"status": "stopping"}
 
 
 @router.get("/runs")
