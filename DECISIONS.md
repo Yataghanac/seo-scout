@@ -775,3 +775,56 @@ block. The dashboard is deliberately one static file with no build step; adding 
 runtime and a Node toolchain to assert a two-line listener would cost more to explain than the
 behaviour is worth. The test asserts the wiring, and a browser confirmed the behaviour once,
 by hand, on the record here.
+
+## Post-launch — The dashboard, redesigned around the first ten seconds
+
+**Trigger.** The dashboard was built to prove the pipeline, and it read like it: an amber-on-
+near-black instrument panel that assumed you already knew what a crawl, an audit and a
+validated rewrite were. The brief for this pass was a product someone would pay for — the same
+data, arranged for a person who has just arrived.
+
+**The palette, and why gray-green.** The reference was firecrawl.dev: a light near-white
+canvas, hairline borders, generous radii, one accent used sparingly, a faint dot grid behind
+the masthead, and mono reserved for data. Its accent is a hot orange; this one is a low-chroma
+moss (`#2f6b4f` light, `#7cc39a` dark) on a gray-green paper (`#f4f6f3` / `#0f1512`). Nothing
+is pure white or pure black. That is not decoration: this is a page someone stares at while
+working through 50 rows, and maximum contrast at maximum saturation is what makes that tiring.
+The severity colours stay distinct but were desaturated to match — a clay red rather than a
+signal red. Light is now the base and dark follows the OS, because the tool is used in daylight
+more often than not; `?theme` still outranks everything for screenshots.
+
+**Typography.** Geist and Geist Mono, the closest honest match to the reference's Suisse and
+GeistMono pairing, with a full fallback stack: if Google Fonts is unreachable the page renders
+in the platform grotesk and looks ordinary rather than broken.
+
+**What changed for the person using it.**
+- **A first run has a first screen.** With no runs the page used to print a CLI command in a
+  warning box. It now shows one sentence and one field — and the crawl bar itself *moves* into
+  that empty state rather than being duplicated, so there is one input, one set of listeners,
+  and nothing to keep in sync. It moves back when a run exists.
+- **Four chips** — all pages, needs work, has a rewrite, clean — do in one click what
+  previously took two dropdowns, and stack with the dropdowns for the rarer questions.
+- **The detail panel got a head**: the score, the URL, close, and `‹ ›` that walk the *filtered*
+  list, so reviewing thirty pages is thirty keystrokes rather than thirty scroll-and-clicks.
+- **`/` focuses the filter, Esc closes the panel.** Two keys, both the ones people try anyway.
+- **A theme toggle** that remembers, because a hosted dashboard is opened by someone whose OS
+  preference is not the author's.
+- **A crawl shows a moving progress strip**, not only a line of text.
+- **Signed out, the controls that would only 401 are gone** — run picker, crawl bar, exports.
+- **The table becomes cards under 780px.** A phone is a plausible way to read a report.
+
+**Non-obvious decision.** `[hidden] { display: none !important; }` is now a global rule. Most
+sections here are grid or flex containers, and the UA's own `[hidden]` rule loses to an explicit
+`display` at equal specificity — the exact bug this project already shipped once, in the sign-in
+panel, and would have shipped again in the empty state. A test pins the line.
+
+**Failure mode prevented.** Chart.js copies its colours at construction time, so the theme
+toggle rebuilds both charts rather than only repainting the CSS around them. And the rule chart
+reserves its label gutter outright (`y.afterFit`), because Chart.js would rather clip
+`meta_description_too_short` than give up plot width — which it did, until a full-page
+screenshot showed it.
+
+**What I chose not to do.** No framework, no build step, no component library: still one HTML
+file served by `api/app.py`, still Chart.js from a CDN with an integrity hash. The redesign is
+CSS and a few dozen lines of vanilla JS, which keeps the dependency story of the whole project
+"httpx, selectolax, sqlite3, openai" rather than "…and a frontend toolchain".
