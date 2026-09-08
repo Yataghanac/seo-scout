@@ -99,11 +99,6 @@ the crawl loop, so the run ends `partial` and everything fetched is still audite
 — cancelling the task would have thrown that away. See DECISIONS.md, "Stopping a crawl without
 throwing it away".
 
-Three PRs are open and stacked in this order — **#3 → #4 → #5**. Claude cannot merge them:
-`gh pr merge` is refused by the permission classifier here. #4 and #5 both append to
-DECISIONS.md, so whichever lands second needs its entry moved after the other's; nothing else
-conflicts.
-
 Nothing else is open. The four review passes of 2026-09-06, the six live-run findings of 2026-09-07,
 and the dashboard-crawl feature (`POST /api/crawls`, the SSRF gate in `api/targets.py`,
 shared-token auth, startup reconciliation) are fixed and recorded in DECISIONS.md.
