@@ -177,7 +177,10 @@
   .start li[data-url] { cursor: pointer; } .start li[data-url]:hover .u { color: var(--accent); }
   .start .u { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12.5px var(--mono); }
   .start .m { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .start li.empty { display: block; counter-increment: none; }
+  /* `counter-increment: none` still leaves ::before printing the counter's value — a literal
+     "0" in front of the empty message. The rank marker has to be removed, not frozen. */
+  .start li.empty { display: block; }
+  .start li.empty::before { content: none; }
   @media (max-width: 1000px) { .start li { grid-template-columns: 20px 74px minmax(0, 1fr); } .start .m { grid-column: 2 / -1; } }
 
   .detail-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -361,6 +364,16 @@ function showEmptyState(empty) {
   else document.querySelector(".actionbar").appendChild($("#crawlbar"));
 }
 
+// A crawl belongs to the server, not to the tab that started it. Someone who reloads — or
+// opens the dashboard on another machine — should see it running, and be able to stop it.
+function adoptRunningCrawl(runs) {
+  if (!runs.some((r) => r.status === "running")) return;
+  $("#crawl-go").disabled = true;
+  $("#crawl-stop").hidden = false;
+  document.body.dataset.crawling = "1";
+  pollCrawl();
+}
+
 async function init() {
   const runs = await api("/api/runs");
   const sel = $("#run");
@@ -374,6 +387,7 @@ async function init() {
   await loadRun(wanted);
   const pick = params.get("page");
   if (pick) showDetail(pick === "first" ? visiblePages()[0]?.url : pick);
+  adoptRunningCrawl(runs);
 }
 
 // After a crawl the page may be coming out of its empty state, so this re-runs the parts of
@@ -586,7 +600,12 @@ function copyBtn(text) { return `<button class="copy" data-copy="${esc(text)}">c
 function renderNotice() {
   const run = state.summary.run, n = $("#notice");
   if (run.status === "complete") { n.hidden = true; return; }
-  n.hidden = false; n.textContent = `Run ${run.id} is ${run.status}${run.error ? ": " + run.error : ""}. Results below cover the pages fetched before it stopped.`;
+  n.hidden = false;
+  n.textContent = run.status === "running"
+    // No page count here: the crawl bar already shows a live one, and the run row's own
+    // count is whatever was stored when this summary was built — a second contradicting it.
+    ? `Run ${run.id} is still crawling. This page updates when it finishes.`
+    : `Run ${run.id} is ${run.status}${run.error ? ": " + run.error : ""}. Results below cover the pages fetched before it stopped.`;
 }
 
 function renderTiles() {
