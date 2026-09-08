@@ -948,3 +948,28 @@ page's identity, used when parsing links out of crawled HTML, where a scheme-les
 a *relative* URL — teaching it to guess `https://` would quietly corrupt every relative link on
 every page. The guess belongs at the one edge where a human types, so it lives in
 `api/routes.py`. The CLI still wants a full URL, which is the right default for a terminal.
+
+## Post-launch — A hosted demo that does not pretend to be the product
+
+**Trigger.** A link to send a potential buyer. The obvious answer, "deploy it to Vercel", does
+not work and it is worth saying why rather than half-shipping it: a crawl runs for minutes and
+writes to SQLite, and a serverless platform gives you neither — functions are killed in
+seconds and the filesystem does not survive the request.
+
+**Non-obvious decision.** So the demo is the shipped dashboard, unmodified, reading a frozen
+snapshot of two real runs. `dev/build_demo_site.py` fetches from a live `seo-scout serve` and
+writes `demo-site/`: the same `index.html` with exactly three changes — a `demoPath()` mapper
+inside `api()` so it reads static JSON, export links pointed at static files, and a Crawl
+button that says why it is disabled instead of failing. Every filter, chart, score, rewrite and
+verdict on that page is genuine output of the real pipeline.
+
+**Failure mode prevented.** The build asserts every anchor it replaces and exits if one is
+missing, so a later edit to the dashboard breaks the demo build loudly rather than producing a
+subtly broken page. And the mapper lives in one function rather than at each call site, so a
+new fetch path in the product surfaces as an unmapped request in the demo instead of silently
+falling through to a 404 the page would swallow.
+
+**What I chose not to do.** No mocked data, no screenshots pretending to be an app, and no
+fake Crawl button that appears to work. A buyer clicking Crawl is told, in the product's own
+voice, that this is a snapshot and where the real thing lives. A demo that lies about what it
+is teaches a buyer exactly the wrong thing about the engineering behind it.
