@@ -91,6 +91,23 @@ def test_index_serves_the_dashboard(client: TestClient) -> None:
     assert "chart.js" in r.text.lower()
 
 
+def test_the_hidden_attribute_is_forced_to_win(client: TestClient) -> None:
+    """`hidden` has to beat an explicit `display`, or hiding a section does nothing at all.
+
+    Most sections on this page are grid or flex containers, and the UA's own
+    `[hidden] { display: none }` loses to them at equal specificity. That has already shipped
+    as a bug once, in the sign-in panel; this is the one line that stops it recurring.
+    """
+    assert "[hidden] { display: none !important; }" in client.get("/").text
+
+
+def test_the_dashboard_ships_its_first_run_and_triage_affordances(client: TestClient) -> None:
+    """The parts a first-time user meets, pinned so a later edit cannot quietly drop them."""
+    body = client.get("/").text
+    for probe in ('id="hero"', 'id="theme-toggle"', 'data-chip="attention"', 'id="detail-close"'):
+        assert probe in body, f"{probe} is gone from the dashboard"
+
+
 @pytest.mark.parametrize("field", ["#crawl-url", "#signin-token"])
 def test_enter_is_an_explicit_listener_not_implicit_submission(
     client: TestClient, field: str

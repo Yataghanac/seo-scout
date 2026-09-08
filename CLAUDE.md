@@ -21,7 +21,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy --strict src/
 
 Python 3.12+, httpx, selectolax, protego, sqlite3 (no ORM), openai (Structured Outputs),
 tiktoken, pydantic v2 + pydantic-settings, typer, FastAPI + uvicorn, one static HTML dashboard
-with Chart.js from CDN. Tests: pytest + pytest-asyncio + respx; a fake OpenAI client.
+with Chart.js and Geist / Geist Mono from CDNs (both degrade to a fallback stack offline). Tests: pytest + pytest-asyncio + respx; a fake OpenAI client.
 Additions: tldextract (registrable-domain check), defusedxml (untrusted sitemap XML),
 truststore (OS certificate store for corporate TLS). No LangChain/Scrapy/Celery/Docker.
 
@@ -64,12 +64,13 @@ Serve the project DB, then capture with headless Chrome/Edge (dark theme, first 
 
 ```bash
 uv run seo-scout serve &
-chrome --headless --hide-scrollbars --window-size=1440,1750 --virtual-time-budget=8000 \
+chrome --headless --hide-scrollbars --window-size=1440,1980 --virtual-time-budget=8000 \
   --screenshot=docs/screenshot.png "http://127.0.0.1:8000/?run=1&theme=dark&still=1&size=6&page=first"
 ```
 
 Query hooks: `?theme=dark|light`, `?still=1` (no animation), `?size=N`, `?run=<id>`,
-`?page=first|<url>`.
+`?page=first|<url>`. `?theme` outranks the header's toggle, which otherwise remembers a
+choice in `localStorage`; with neither, the OS decides.
 
 ## Pending
 
