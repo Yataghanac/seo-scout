@@ -86,6 +86,18 @@ one. A parametrised test pins both listeners; `signIn` starts with `if (btn.disa
 so no browser can sign in twice from one key. See DECISIONS.md, "The Enter key, and a
 behaviour that could not be tested"
 
+The dashboard was redesigned on 2026-09-08 (branch `feat/dashboard-redesign`, PR #5): a
+gray-green light-first palette after firecrawl.dev, Geist / Geist Mono, a first-run empty state
+that borrows the crawl bar itself, four triage chips, a detail panel with close and prev/next,
+`/` and Esc, a remembered theme toggle, and a card layout under 780px. Verified against both a
+healthy 25-page crawl and `dev/fixture_site.py`'s deliberately broken one (5 criticals, no AI
+stage). See DECISIONS.md, "The dashboard, redesigned around the first ten seconds".
+
+Three PRs are open and stacked in this order — **#3 → #4 → #5**. Claude cannot merge them:
+`gh pr merge` is refused by the permission classifier here. #4 and #5 both append to
+DECISIONS.md, so whichever lands second needs its entry moved after the other's; nothing else
+conflicts.
+
 Nothing else is open. The four review passes of 2026-09-06, the six live-run findings of 2026-09-07,
 and the dashboard-crawl feature (`POST /api/crawls`, the SSRF gate in `api/targets.py`,
 shared-token auth, startup reconciliation) are fixed and recorded in DECISIONS.md.
