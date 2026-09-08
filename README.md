@@ -4,6 +4,9 @@ Crawl a website, audit every page against deterministic SEO rules, ask GPT-4o to
 weak titles and meta descriptions, **validate every answer before you see it**, and browse the
 results in a dashboard. Self-hosted, one SQLite file, one command.
 
+**[Live demo →](https://yataghanac.github.io/seo-scout/)** — the real dashboard on a real
+50-page crawl, frozen as static data. Crawling is disabled there; everything else is genuine.
+
 ![SEO Scout dashboard](docs/screenshot.png)
 
 ## Quickstart
